@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 
 import pytest
@@ -36,16 +37,47 @@ def settings(tmp_path, monkeypatch) -> Settings:
     reset_engine_for_tests()
 
 
+async def _clear_namespace(backend, namespace: str) -> None:
+    """Drop only this suite's keys - never FLUSHDB someone's Redis."""
+    keys = await backend.keys(f"{namespace}:*")
+    if keys:
+        await backend.delete(*keys)
+
+
 @pytest.fixture
-def redis() -> InMemoryRedis:
-    backend = InMemoryRedis()
+async def redis(settings: Settings):
+    """The queue backend under test.
+
+    Defaults to the in-process stub so the suite needs no services. Set
+    ``VOICEOPS_TEST_REDIS_URL`` to run the very same tests against a real
+    Redis, which is the only way the Lua scripts in app.queue.scripts get
+    executed - the stub runs their Python transliterations instead.
+
+        VOICEOPS_TEST_REDIS_URL=redis://localhost:6379/15 pytest
+    """
+    url = os.getenv("VOICEOPS_TEST_REDIS_URL")
+    if not url:
+        backend = InMemoryRedis()
+        set_redis(backend)
+        yield backend
+        set_redis(None)
+        return
+
+    from app.queue.redis_client import RealRedis
+
+    backend = RealRedis(url)
+    await _clear_namespace(backend, settings.queue_namespace)
     set_redis(backend)
-    yield backend
-    set_redis(None)
+    try:
+        yield backend
+    finally:
+        await _clear_namespace(backend, settings.queue_namespace)
+        set_redis(None)
+        await backend.close()
 
 
 @pytest.fixture
-def queue(settings: Settings, redis: InMemoryRedis) -> CallQueue:
+async def queue(settings: Settings, redis) -> CallQueue:
     q = CallQueue(redis=redis, settings=settings)
     set_queue(q)
     yield q

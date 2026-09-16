@@ -126,7 +126,13 @@ class CallQueue:
         due = job.scheduled_at_ms if job.scheduled_at_ms is not None else now
         state = await self.redis.run_script(
             scripts.ENQUEUE,
-            [self.keys.ready, self.keys.scheduled, self.keys.jobs, self.keys.meta],
+            [
+                self.keys.ready,
+                self.keys.scheduled,
+                self.keys.jobs,
+                self.keys.meta,
+                self.keys.processing,
+            ],
             [job.call_id, job.to_json(), job.priority.rank, int(due), now],
         )
         await self.incr_counter("enqueued")

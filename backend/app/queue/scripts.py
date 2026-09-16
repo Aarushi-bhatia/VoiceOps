@@ -20,15 +20,23 @@ PRIORITY_STRIDE = 1e13
 
 # --------------------------------------------------------------------------
 # enqueue: place a call in the ready queue, or park it until scheduled_at.
-# KEYS: ready, scheduled, jobs, meta
+#
+# Also drops any lease the call is holding. A retry is enqueued by the very
+# worker that just failed it and still holds its lease; leaving that lease in
+# place would let the reaper reclaim the call once it expired, so the call
+# would be attempted twice - a second phone call to the same customer. For a
+# brand-new call the ZREM is a no-op.
+#
+# KEYS: ready, scheduled, jobs, meta, processing
 # ARGV: call_id, payload_json, rank, due_ms, now_ms
 # --------------------------------------------------------------------------
 _ENQUEUE_LUA = """
-local ready, scheduled, jobs, meta = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
+local ready, scheduled, jobs, meta, processing = KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5]
 local id, payload = ARGV[1], ARGV[2]
 local rank, due, now = tonumber(ARGV[3]), tonumber(ARGV[4]), tonumber(ARGV[5])
 redis.call('HSET', jobs, id, payload)
 redis.call('HSET', meta, id, rank)
+redis.call('ZREM', processing, id)
 if due > now then
   redis.call('ZREM', ready, id)
   redis.call('ZADD', scheduled, due, id)
@@ -41,11 +49,12 @@ return 'ready'
 
 
 def _enqueue(r: InMemoryRedis, keys: list[str], args: list[str]) -> str:
-    ready, scheduled, jobs, meta = keys
+    ready, scheduled, jobs, meta, processing = keys
     call_id, payload = args[0], args[1]
     rank, due, now = float(args[2]), float(args[3]), float(args[4])
     r.s_hset(jobs, call_id, payload)
     r.s_hset(meta, call_id, str(int(rank)))
+    r.s_zrem(processing, call_id)
     if due > now:
         r.s_zrem(ready, call_id)
         r.s_zadd(scheduled, call_id, due)

@@ -168,3 +168,45 @@ async def test_cancel_removes_a_waiting_call(queue: CallQueue):
     await queue.cancel(job.call_id)
     assert await queue.claim(5) == []
     assert (await queue.stats()).counters["canceled"] == 1
+
+
+async def test_scheduling_a_retry_releases_the_lease(queue: CallQueue):
+    """A retried call must not stay in `processing`.
+
+    The worker that failed the call still holds its lease. If enqueueing the
+    retry left that lease behind, the reaper would reclaim the call once it
+    expired and the customer would be phoned twice.
+    """
+    job = make_job("+1leak")
+    await queue.enqueue(job)
+    await queue.claim(1)
+    assert (await queue.stats()).processing == 1
+
+    await queue.schedule_retry(job, datetime.now(UTC) + timedelta(minutes=5))
+
+    stats = await queue.stats()
+    assert stats.processing == 0, "the lease must be released when the retry is queued"
+    assert stats.scheduled == 1
+
+
+async def test_a_retried_call_is_not_also_reclaimed(queue: CallQueue):
+    job = make_job("+1double")
+    await queue.enqueue(job)
+    # An expired lease is what the reaper looks for.
+    await queue.claim(1, lease_seconds=-1)
+    await queue.schedule_retry(job, datetime.now(UTC) + timedelta(minutes=5))
+
+    assert await queue.reclaim_stalled() == [], "a rescheduled call must not be reclaimed too"
+    assert (await queue.stats()).counters["reclaimed"] == 0
+
+
+async def test_requeueing_releases_a_dead_workers_lease(queue: CallQueue):
+    """Recovery and manual retry paths go through enqueue, so they release too."""
+    job = make_job("+1recover")
+    await queue.enqueue(job)
+    await queue.claim(1, lease_seconds=-1)
+
+    await queue.enqueue(job)
+
+    stats = await queue.stats()
+    assert (stats.processing, stats.ready) == (0, 1)
