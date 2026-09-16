@@ -1,0 +1,88 @@
+name: voiceops
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: voiceops
+      POSTGRES_PASSWORD: voiceops
+      POSTGRES_DB: voiceops
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voiceops -d voiceops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    # appendonly keeps the queue across restarts: scheduled retries survive a
+    # deploy instead of being silently dropped.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  api:
+    build: ./backend
+    environment: &backend-env
+      DATABASE_URL: postgresql+asyncpg://voiceops:voiceops@postgres:5432/voiceops
+      REDIS_URL: redis://redis:6379/0
+      VOICEOPS_ENV: docker
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+      STT_PROVIDER: ${STT_PROVIDER:-mock}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      TTS_PROVIDER: ${TTS_PROVIDER:-mock}
+      TELEPHONY_PROVIDER: ${TELEPHONY_PROVIDER:-mock}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      TWILIO_PUBLIC_BASE_URL: ${TWILIO_PUBLIC_BASE_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker.main"]
+    environment:
+      <<: *backend-env
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+    depends_on:
+      api:
+        condition: service_healthy
+    # Scale out with: docker compose up -d --scale worker=3
+    deploy:
+      replicas: 1
+
+  dashboard:
+    build:
+      context: ./frontend
+      # No VITE_API_BASE_URL: the dashboard calls its own origin and nginx
+      # proxies /api, /ws and /docs to the api service, so there is no CORS.
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+volumes:
+  postgres-data:
+  redis-data:

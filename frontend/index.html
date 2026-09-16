@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VoiceOps — CX Operations</title>
+    <meta name="description" content="Monitor voice AI support calls, agents, queue health and outcomes." />
+    <script>
+      // Apply the stored theme before first paint to avoid a flash.
+      try {
+        const stored = localStorage.getItem('voiceops-theme')
+        if (stored === 'dark' || stored === 'light') {
+          document.documentElement.setAttribute('data-theme', stored)
+        }
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
