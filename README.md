@@ -1,7 +1,5 @@
 # VoiceOps
 
-[![CI](https://github.com/Aarushi-bhatia/VoiceOps/actions/workflows/ci.yml/badge.svg)](https://github.com/Aarushi-bhatia/VoiceOps/actions/workflows/ci.yml)
-
 A voice AI platform for automating customer-support calls. Speech-to-text, an LLM, and text-to-speech run over a configurable agent workflow; a Redis-backed queue schedules and retries the calls; a React dashboard lets CX configure agents and see what happened.
 
 Every provider has a deterministic mock, so the whole system — real conversations included — runs with no API keys and no phone line.

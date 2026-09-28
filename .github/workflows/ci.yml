@@ -1,10 +1,15 @@
 name: CI
 
+# Manual only for now: GitHub has Actions locked on this account over a
+# billing issue, so every automatic run fails before it starts and marks the
+# commit red. Restore the push and pull_request triggers below once that is
+# resolved - the pipeline itself passes (verified locally on Python 3.12
+# against real Redis and Postgres).
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
 
 concurrency:
   # A new push supersedes an in-flight run on the same branch.
