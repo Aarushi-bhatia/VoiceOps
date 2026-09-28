@@ -96,10 +96,15 @@ jobs:
           alembic check
           alembic downgrade base
 
+      # A separate database: the test steps above create their schema with
+      # create_all, so running migrations against the same one would fail with
+      # "relation already exists". Migrations need somewhere genuinely empty.
       - name: Migrations apply to Postgres too
         env:
-          DATABASE_URL: postgresql+asyncpg://voiceops:voiceops@localhost:5432/voiceops_test
+          PGPASSWORD: voiceops
+          DATABASE_URL: postgresql+asyncpg://voiceops:voiceops@localhost:5432/voiceops_migrations
         run: |
+          psql -h localhost -U voiceops -d postgres -c "CREATE DATABASE voiceops_migrations;"
           alembic upgrade head
           alembic check
           alembic downgrade base
