@@ -129,6 +129,15 @@ class SimulatedCustomer:
                 "confirm that",
                 "sound good",
                 "is that right",
+                # Outbound check-in phrasing, e.g. "did everything arrive as
+                # expected?" - without these the customer treats a yes/no
+                # question as an opening and states an inbound-style goal.
+                "did everything",
+                "as expected",
+                "everything ok",
+                "everything okay",
+                "all okay",
+                "happy with",
             )
         )
 

@@ -6,8 +6,14 @@ import pytest
 
 from app.agents.runtime import AgentConfig, ConversationRuntime
 from app.agents.workflow import DEFAULT_WORKFLOW, Workflow
-from app.core.enums import CallOutcome, TurnRole
-from app.voice.base import AudioChunk, DialRequest, TelephonyError, VoiceStack
+from app.core.enums import CallOutcome, FailureCategory, TurnRole
+from app.voice.base import (
+    AudioChunk,
+    DialRequest,
+    TelephonyError,
+    VoiceProviderError,
+    VoiceStack,
+)
 from app.voice.llm.mock import MockLanguageModel
 from app.voice.stt.mock import MockSpeechToText
 from app.voice.telephony.mock import MockTelephonyProvider
@@ -222,3 +228,80 @@ async def test_busy_number_answers_once_attempts_advance():
     provider = MockTelephonyProvider(latency_scale=0.0)
     session = await provider.dial(DialRequest(call_id="c", to_number="+15558888", attempt=2))
     assert session.is_open
+
+
+async def test_a_word_shared_by_every_intent_does_not_decide_the_branch():
+    """A topic word is not a signal about which branch was meant.
+
+    The delivery follow-up agent asked "did everything arrive as expected?" and
+    the customer said their delivery had not shown up. The yes branch's
+    description contained the word "delivery", so that one word matched and the
+    agent replied "that's great to hear" and hung up as resolved.
+
+    One word out of a seven-word sentence is a weak signal, so confidence is
+    scored on how much of the reply matched rather than on the option's own
+    vocabulary. The wording here is the real seeded wording, where "delivery"
+    appears in only one branch - an earlier version of this test put it in both
+    and passed for the wrong reason.
+    """
+    workflow = {
+        "start_node": "check",
+        "nodes": [
+            {
+                "id": "check",
+                "type": "branch",
+                "prompt": "Did everything arrive as expected?",
+                "intents": [
+                    {
+                        "name": "yes",
+                        "description": "confirms the delivery was fine",
+                        "examples": ["yes", "all good"],
+                        "next": "happy",
+                    },
+                    {
+                        "name": "no",
+                        "description": "reports a problem: damaged, broken, missing, wrong item",
+                        "examples": ["it arrived broken"],
+                        "next": "sorry",
+                    },
+                ],
+                "default": "sorry",
+                "max_attempts": 1,
+            },
+            {"id": "happy", "type": "hangup", "outcome": "resolved"},
+            {"id": "sorry", "type": "transfer", "destination": "support", "outcome": "escalated"},
+        ],
+    }
+    session = ScriptedSession(["I'm calling about a delivery that hasn't shown up yet."])
+    result = await ConversationRuntime(build_stack(), config(workflow)).run(session)
+
+    assert result.outcome is not CallOutcome.RESOLVED, (
+        "a complaint must never be routed to the happy path"
+    )
+    assert result.node_path == ["check", "sorry"]
+
+
+async def test_the_line_is_released_when_a_provider_fails_mid_call():
+    """A failure mid-conversation must still hang up.
+
+    Only TelephonyError was handled, so an LLM erroring part-way through left
+    the run loop without hanging up. On mock telephony that leaks an object; on
+    a real carrier it leaves the customer connected to a silent bot, on a call
+    that keeps billing until they give up and hang up themselves.
+    """
+
+    class ExplodingLLM:
+        name = "exploding"
+
+        async def complete(self, messages, **kwargs):
+            raise VoiceProviderError("provider is down", category=FailureCategory.RATE_LIMITED)
+
+    stack = build_stack()
+    stack.llm = ExplodingLLM()
+    session = ScriptedSession(["I need a refund for a damaged order"])
+
+    with pytest.raises(VoiceProviderError):
+        await ConversationRuntime(stack, config(DEFAULT_WORKFLOW)).run(session)
+
+    assert session.hung_up, "the call must be hung up even when the run fails"
+    assert not session.is_open

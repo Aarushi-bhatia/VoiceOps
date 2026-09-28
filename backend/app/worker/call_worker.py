@@ -16,15 +16,18 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 from app.agents.runtime import AgentConfig, ConversationRuntime
 from app.agents.workflow import Workflow
 from app.core.config import Settings, get_settings
-from app.core.enums import CallStatus, FailureCategory
+from app.core.enums import CallStatus, EventType, FailureCategory
 from app.db.models import Agent, Call
 from app.db.session import session_scope
 from app.queue.call_queue import CallQueue, QueuedCall, get_queue
-from app.queue.retry import RetryPolicy
+from app.queue.retry import RetryAction, RetryPolicy
+from app.queue.throttle import CarrierThrottle, DoNotCallList, next_calling_window
 from app.services.calls import CallService
 from app.voice.base import DialRequest, TelephonyError, VoiceProviderError, VoiceStack
 from app.voice.registry import get_voice_stack
@@ -45,6 +48,13 @@ class CallWorker:
         self.queue = queue or get_queue()
         self.stack = stack or get_voice_stack(self.settings)
         self.retry_policy = RetryPolicy.from_settings(self.settings)
+        self.throttle = CarrierThrottle(
+            self.queue.redis,
+            self.settings.queue_namespace,
+            calls_per_second=self.settings.carrier_calls_per_second,
+            burst=self.settings.carrier_burst,
+        )
+        self.dnc = DoNotCallList(self.queue.redis, self.settings.queue_namespace)
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self._running: dict[str, asyncio.Task[None]] = {}
         self._stopping = asyncio.Event()
@@ -156,6 +166,11 @@ class CallWorker:
                     provider="voiceops",
                 )
             config = build_agent_config(agent)
+
+            gate = await self._before_dialling(service, call, job)
+            if gate is not None:
+                return
+
             await service.mark_dialing(call, attempt)
             call_context = {"to_number": call.to_number, **(call.call_metadata or {})}
             agent_id = call.agent_id
@@ -191,7 +206,15 @@ class CallWorker:
             await service.mark_answered(call, session_handle.external_id)
 
         runtime = ConversationRuntime(self.stack, config, on_event=emit)
-        result = await runtime.run(session_handle, context=call_context)
+        try:
+            result = await runtime.run(session_handle, context=call_context)
+        except VoiceProviderError as exc:
+            # They had already answered. Redialling would ring them again and
+            # start from the greeting, from a bot with no memory of the
+            # conversation they were just in - which is the same reason a
+            # dropped line is not redialled either.
+            await self._handle_failure(job, category=exc.category, reason=str(exc), answered=True)
+            return
 
         async with session_scope() as session:
             service = CallService(session, self.queue)
@@ -211,15 +234,113 @@ class CallWorker:
             },
         )
 
+    # --------------------------- pre-dial gates ----------------------------
+
+    async def _before_dialling(
+        self, service: CallService, call: Call, job: QueuedCall
+    ) -> str | None:
+        """Checks that run before a number is dialled.
+
+        Returns a reason string when the call must not go out now, having
+        already disposed of it (dropped or deferred). Deferrals do not consume
+        a retry attempt: nothing went wrong with the call, it simply is not its
+        turn yet.
+        """
+        now = _utcnow()
+
+        # 1. Too old to be worth placing.
+        max_age = self.settings.max_call_age_seconds
+        if max_age > 0 and call.created_at is not None:
+            age = (now - call.created_at).total_seconds()
+            if age > max_age:
+                await service.record_failure(
+                    call,
+                    category=FailureCategory.EXPIRED,
+                    reason=(
+                        f"queued {age / 3600:.1f}h ago, older than the {max_age / 3600:.1f}h limit"
+                    ),
+                    attempt=job.attempt,
+                    retry_at=None,
+                    dead_lettered=True,
+                )
+                await self.queue.dead_letter(job, "expired: too old to place")
+                return "expired"
+
+        # 2. On the do-not-call list. Numbers can be added after queueing.
+        if await self.dnc.contains(call.to_number):
+            await service.record_failure(
+                call,
+                category=FailureCategory.DO_NOT_CALL,
+                reason="destination is on the do-not-call list",
+                attempt=job.attempt,
+                retry_at=None,
+                dead_lettered=True,
+            )
+            await self.queue.dead_letter(job, "do_not_call: suppressed")
+            return "do_not_call"
+
+        # 3. Outside calling hours - defer to the next window.
+        window = next_calling_window(
+            now,
+            start_hour=self.settings.calling_hours_start,
+            end_hour=self.settings.calling_hours_end,
+            timezone_name=(call.call_metadata or {}).get(
+                "timezone", self.settings.calling_hours_timezone
+            ),
+        )
+        if window is not None:
+            call.status = CallStatus.SCHEDULED
+            call.scheduled_at = window
+            await service.record_event(
+                call, EventType.DEFERRED, {"reason": "outside calling hours", "until": window}
+            )
+            await self.queue.defer(job, window)
+            return "calling_hours"
+
+        # 4. Carrier rate limit. This is the real throughput ceiling, not us.
+        wait_seconds = await self.throttle.acquire(call.from_number)
+        if wait_seconds > 0:
+            until = now + timedelta(seconds=wait_seconds)
+            call.status = CallStatus.SCHEDULED
+            call.scheduled_at = until
+            await service.record_event(
+                call,
+                EventType.THROTTLED,
+                {"reason": "carrier rate limit", "wait_seconds": round(wait_seconds, 2)},
+            )
+            await self.queue.defer(job, until, counter="throttled")
+            return "throttled"
+
+        return None
+
     # ------------------------------ failures -------------------------------
 
     async def _handle_failure(
-        self, job: QueuedCall, *, category: FailureCategory, reason: str
+        self,
+        job: QueuedCall,
+        *,
+        category: FailureCategory,
+        reason: str,
+        answered: bool = False,
     ) -> None:
         attempt = job.attempt + 1
         decision = self.retry_policy.decide(
             attempt=attempt, category=category, max_attempts=job.max_attempts
         )
+
+        # A failure once the customer has answered is never redialled, whatever
+        # caused it. The rule is about the person, not the component: they have
+        # already been interrupted once, and ringing back to replay the
+        # greeting is worse than leaving it for a human. It goes to the dead
+        # letter queue so somebody decides.
+        if answered and decision.should_retry:
+            decision = replace(
+                decision,
+                action=RetryAction.DEAD_LETTER,
+                delay_seconds=0.0,
+                retry_at=None,
+                reason=f"{category} after the customer answered; not redialling",
+            )
 
         async with session_scope() as session:
             service = CallService(session, self.queue)
@@ -251,6 +372,10 @@ class CallWorker:
             job.attempt = attempt
             await self.queue.dead_letter(job, f"{category}: {reason}")
             await self.queue.incr_counter("failed")
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 def build_agent_config(agent: Agent) -> AgentConfig:

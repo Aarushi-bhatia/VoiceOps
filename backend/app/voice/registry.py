@@ -52,6 +52,15 @@ def build_llm(settings: Settings) -> LanguageModel:
         from app.voice.llm.anthropic import AnthropicLanguageModel
 
         return AnthropicLanguageModel(settings.anthropic_api_key, model=settings.anthropic_model)
+    if settings.llm_provider == "gemini":
+        from app.voice.llm.gemini import GeminiLanguageModel
+
+        return GeminiLanguageModel(
+            settings.gemini_api_key,
+            model=settings.gemini_model,
+            thinking_budget=settings.gemini_thinking_budget,
+            max_attempts=settings.gemini_max_attempts,
+        )
     raise ValueError(f"unknown LLM_PROVIDER: {settings.llm_provider}")
 
 

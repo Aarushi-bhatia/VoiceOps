@@ -1,0 +1,29 @@
+# Transcripts contain personal data, so they are deleted on a schedule rather
+# than kept forever. Runs nightly; RETENTION_DAYS controls the window.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: retention
+  namespace: voiceops
+spec:
+  schedule: "17 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: retention
+              image: voiceops-backend:latest
+              imagePullPolicy: IfNotPresent
+              command: ["python", "scripts/retention.py"]
+              envFrom:
+                - configMapRef: { name: voiceops-config }
+                - secretRef: { name: voiceops-secrets }
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { memory: 512Mi }

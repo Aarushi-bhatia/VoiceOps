@@ -38,6 +38,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://voiceops:voiceops@postgres:5432/voiceops
       REDIS_URL: redis://redis:6379/0
       VOICEOPS_ENV: docker
+      CARRIER_CALLS_PER_SECOND: ${CARRIER_CALLS_PER_SECOND:-1.0}
+      CALLING_HOURS_START: ${CALLING_HOURS_START:-9}
+      CALLING_HOURS_END: ${CALLING_HOURS_END:-20}
+      API_KEYS: ${API_KEYS:-}
       LOG_LEVEL: INFO
       CORS_ORIGINS: http://localhost:5173,http://localhost:3000
       STT_PROVIDER: ${STT_PROVIDER:-mock}
@@ -47,6 +51,8 @@ services:
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
@@ -69,6 +75,28 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # The image's healthcheck probes the HTTP API, which the worker does not
+    # serve - it would fail forever. Check what the worker actually needs
+    # instead: that it can reach Redis and the database.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import asyncio
+          from sqlalchemy import text
+          from app.db.session import session_scope
+          from app.queue.redis_client import get_redis
+          async def check():
+              await get_redis().ping()
+              async with session_scope() as s:
+                  await s.execute(text("SELECT 1"))
+          asyncio.run(check())
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
     # Scale out with: docker compose up -d --scale worker=3
     deploy:
       replicas: 1

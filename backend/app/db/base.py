@@ -90,6 +90,12 @@ def enum_column(enum_cls, **kwargs):
             length=32,
             values_callable=lambda e: [member.value for member in e],
             validate_strings=True,
+            # Emit a CHECK constraint so the database rejects a bad value too.
+            # Without it the enum is enforced only in Python, and anything
+            # writing SQL directly - a migration, a fix-up script, another
+            # service - could store a status nothing knows how to read.
+            create_constraint=True,
+            name=f"ck_{enum_cls.__name__.lower()}",
         ),
         **kwargs,
     )

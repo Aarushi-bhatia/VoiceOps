@@ -86,7 +86,7 @@ class AnthropicLanguageModel:
             output_config["format"] = {"type": "json_schema", "schema": json_schema}
 
         request: dict[str, Any] = {
-            "model": model or self.model,
+            "model": self._resolve_model(model),
             # Conversational turns are one or two sentences of JSON; a small cap
             # keeps time-to-first-word low on a live call.
             "max_tokens": max_tokens,
@@ -132,6 +132,22 @@ class AnthropicLanguageModel:
             provider=self.name,
             structured=structured,
         )
+
+    def _resolve_model(self, requested: str | None) -> str:
+        """Honour a per-agent model override only if this provider serves it.
+
+        An agent's ``llm_model`` is provider-specific; one configured against a
+        different provider would otherwise be sent verbatim and rejected.
+        """
+        if not requested or requested == self.model:
+            return self.model
+        if requested.startswith("claude"):
+            return requested
+        logger.info(
+            "ignoring a model override that is not a Claude model",
+            extra={"requested": requested, "using": self.model},
+        )
+        return self.model
 
 
 def _to_provider_error(exc: Exception, provider: str) -> VoiceProviderError:

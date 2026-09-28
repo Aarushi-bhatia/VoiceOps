@@ -28,7 +28,7 @@ FOLLOW_UP_WORKFLOW: dict[str, Any] = {
             "intents": [
                 {
                     "name": "yes",
-                    "description": "confirms the delivery was fine, correct, right, good",
+                    "description": "confirms everything was fine, correct, right, good",
                     "examples": ["yes", "all good", "that's right"],
                     "next": "thanks",
                 },

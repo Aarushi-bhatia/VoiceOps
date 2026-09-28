@@ -14,15 +14,25 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.enums import CallOutcome, CallPriority, CallStatus, EventType, FailureCategory
 from app.db.models import Agent, Call, CallEvent, CallTurn
 from app.queue.call_queue import CallQueue, QueuedCall, get_queue
+from app.queue.throttle import DoNotCallList
 
 logger = logging.getLogger(__name__)
 
 
 class CallNotFoundError(LookupError):
     pass
+
+
+class QueueFullError(RuntimeError):
+    """The backlog is at its cap. Producers must slow down (HTTP 429)."""
+
+
+class DoNotCallError(ValueError):
+    """The destination is on the do-not-call list."""
 
 
 class AgentNotFoundError(LookupError):
@@ -33,6 +43,7 @@ class CallService:
     def __init__(self, session: AsyncSession, queue: CallQueue | None = None) -> None:
         self.session = session
         self.queue = queue or get_queue()
+        self.dnc = DoNotCallList(self.queue.redis, self.queue.settings.queue_namespace)
 
     # ------------------------------ creating ------------------------------
 
@@ -64,6 +75,19 @@ class CallService:
             raise AgentNotFoundError(f"no agent {agent_id}")
         if not agent.is_active:
             raise ValueError(f"agent '{agent.name}' is not active")
+
+        # Admission control. Workers already pull only what they can handle, so
+        # nothing overflows in memory - but without a cap the backlog grows
+        # unbounded and calls get placed hours after they mattered.
+        if await self.dnc.contains(to_number):
+            raise DoNotCallError(f"{to_number} is on the do-not-call list")
+
+        cap = self.queue.settings.max_queue_depth
+        if cap > 0:
+            stats = await self.queue.stats()
+            if stats.backlog >= cap:
+                await self.queue.incr_counter("rejected")
+                raise QueueFullError(f"queue is at capacity ({stats.backlog}/{cap}); retry later")
 
         now = _utcnow()
         is_future = scheduled_at is not None and scheduled_at > now
@@ -166,7 +190,7 @@ class CallService:
         call.summary = result.summary
         call.collected_data = dict(result.collected)
         call.duration_seconds = result.duration_seconds
-        call.cost_cents = estimate_cost_cents(result)
+        call.cost_cents = estimate_cost_cents(result, self.queue.settings)
 
         for turn in result.turns:
             self.session.add(
@@ -269,22 +293,20 @@ class CallService:
         return call
 
 
-# Rough per-call cost model, used for dashboard reporting. Tune per contract.
-STT_CENTS_PER_MINUTE = 0.43
-TTS_CENTS_PER_1K_CHARS = 3.0
-TELEPHONY_CENTS_PER_MINUTE = 1.3
-LLM_CENTS_PER_1K_INPUT = 0.5
-LLM_CENTS_PER_1K_OUTPUT = 2.5
+def estimate_cost_cents(result: Any, settings: Settings | None = None) -> float:
+    """Per-call cost estimate from the configured rates.
 
-
-def estimate_cost_cents(result: Any) -> float:
+    These are estimates for dashboard reporting, not billing. The rates live in
+    settings so they can be replaced with contracted ones without a code change.
+    """
+    rates = settings or get_settings()
     minutes = max(result.duration_seconds, 0.0) / 60
     agent_chars = sum(len(t.text) for t in result.turns if str(t.role) == "agent")
     return round(
-        minutes * (STT_CENTS_PER_MINUTE + TELEPHONY_CENTS_PER_MINUTE)
-        + (agent_chars / 1000) * TTS_CENTS_PER_1K_CHARS
-        + (result.input_tokens / 1000) * LLM_CENTS_PER_1K_INPUT
-        + (result.output_tokens / 1000) * LLM_CENTS_PER_1K_OUTPUT,
+        minutes * (rates.cost_stt_cents_per_minute + rates.cost_telephony_cents_per_minute)
+        + (agent_chars / 1000) * rates.cost_tts_cents_per_1k_chars
+        + (result.input_tokens / 1000) * rates.cost_llm_cents_per_1k_input
+        + (result.output_tokens / 1000) * rates.cost_llm_cents_per_1k_output,
         4,
     )
 

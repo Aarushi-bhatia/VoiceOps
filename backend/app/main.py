@@ -12,7 +12,16 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import agents, analytics, calls, events, health, queue
+from app.api.routes import (
+    agents,
+    analytics,
+    calls,
+    events,
+    health,
+    metrics,
+    queue,
+    suppression,
+)
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.session import dispose_engine, init_models
@@ -40,6 +49,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        events.reset_shutdown()
+        events.install_shutdown_signal_handlers()
         await init_models()
         get_voice_stack(settings)
         await _restore_queue()
@@ -56,6 +67,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            # Let the live-event websockets return instead of blocking shutdown
+            # while they wait on Redis for a message that may never arrive.
+            events.begin_shutdown()
+            events.restore_shutdown_signal_handlers()
             if worker_task is not None:
                 await app.state.worker.stop(drain=False)
                 worker_task.cancel()
@@ -86,7 +101,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(events.router)
-    for module in (agents, calls, queue, analytics):
+    app.include_router(metrics.router)
+    for module in (agents, calls, queue, analytics, suppression):
         app.include_router(module.router, prefix=API_PREFIX)
 
     @app.exception_handler(ValueError)

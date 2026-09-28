@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes an in-flight run on the same branch.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+
+    services:
+      # The queue's Lua scripts only execute against a real Redis. Without this
+      # the suite would exercise the Python fallback alone, which is how the
+      # duplicate-call lease bug went unnoticed.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      # Postgres is the deployment target, and its behaviour differs from
+      # SQLite in ways that matter: transactional DDL, JSONB, real CHECK
+      # constraints. Two bugs hid behind SQLite's laxer semantics.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: voiceops
+          POSTGRES_PASSWORD: voiceops
+          POSTGRES_DB: voiceops_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U voiceops"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Lint
+        run: ruff check app tests scripts
+
+      - name: Format check
+        run: ruff format --check app tests
+
+      - name: Tests (in-process queue)
+        run: pytest -q -m "not slow"
+
+      - name: Tests (real Redis, exercises the Lua scripts)
+        env:
+          VOICEOPS_TEST_REDIS_URL: redis://localhost:6379/15
+        run: pytest -q -m "not slow"
+
+      - name: Tests (Postgres and real Redis)
+        env:
+          VOICEOPS_TEST_DATABASE_URL: postgresql+asyncpg://voiceops:voiceops@localhost:5432/voiceops_test
+          VOICEOPS_TEST_REDIS_URL: redis://localhost:6379/15
+        run: pytest -q -m "not slow"
+
+      - name: Shutdown test (spawns a real server)
+        run: pytest -q -m slow
+
+      - name: Migrations apply, match the models, and reverse
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./migrations.db
+        run: |
+          alembic upgrade head
+          alembic check
+          alembic downgrade base
+
+      - name: Migrations apply to Postgres too
+        env:
+          DATABASE_URL: postgresql+asyncpg://voiceops:voiceops@localhost:5432/voiceops_test
+        run: |
+          alembic upgrade head
+          alembic check
+          alembic downgrade base
+
+      - name: Seed script runs end to end
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+        run: python scripts/seed.py --calls 12 --run
+
+      - name: Retention script runs
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+        run: python scripts/retention.py --days 1 --dry-run
+
+  frontend:
+    name: Dashboard
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npx eslint src
+
+      - name: Build
+        run: npm run build

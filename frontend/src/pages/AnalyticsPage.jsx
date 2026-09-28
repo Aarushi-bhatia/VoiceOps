@@ -63,7 +63,7 @@ export default function AnalyticsPage() {
         <StatCard label="Completed" value={formatNumber(data.completed)} />
         <StatCard label="Failed" value={formatNumber(data.failed)} accent={data.failed ? 'var(--status-critical)' : undefined} />
         <StatCard label="Connect rate" value={formatPercent(data.connect_rate)} />
-        <StatCard label="Resolution rate" value={formatPercent(data.resolution_rate)} accent="var(--status-good)" />
+        <StatCard label="Automation rate" value={formatPercent(data.automation_rate)} accent="var(--status-good)" />
         <StatCard label="Spend" value={formatCents(data.total_cost_cents)} />
       </div>
 
@@ -108,6 +108,7 @@ export default function AnalyticsPage() {
             { key: 'completed', header: 'Completed', align: 'right', render: (row) => <span className="tabular">{formatNumber(row.completed)}</span> },
             { key: 'failed', header: 'Failed', align: 'right', render: (row) => <span className="tabular">{formatNumber(row.failed)}</span> },
             { key: 'resolution_rate', header: 'Resolved', align: 'right', render: (row) => <span className="tabular">{formatPercent(row.resolution_rate)}</span> },
+            { key: 'automation_rate', header: 'Automated', align: 'right', render: (row) => <span className="tabular">{formatPercent(row.automation_rate)}</span> },
             { key: 'avg_turns', header: 'Avg turns', align: 'right', render: (row) => <span className="tabular">{row.avg_turns}</span> },
             { key: 'avg_duration_seconds', header: 'Avg length', align: 'right', render: (row) => <span className="tabular">{formatDuration(row.avg_duration_seconds)}</span> },
             { key: 'total_cost_cents', header: 'Cost', align: 'right', render: (row) => <span className="tabular">{formatCents(row.total_cost_cents)}</span> },

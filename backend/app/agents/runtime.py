@@ -140,6 +140,13 @@ class ConversationRuntime:
             logger.info(
                 "call ended early", extra={"reason": str(exc), "node_path": state.node_path}
             )
+        except BaseException:
+            # Anything else - a provider erroring mid-conversation, a timeout,
+            # a cancellation - must still release the line. Without this the
+            # caller is left connected to a bot that has stopped talking, and
+            # with real telephony the call stays billable until they hang up.
+            await self._hangup_safely(session)
+            raise
 
         result = ConversationResult(
             outcome=state.outcome,

@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: voiceops-config
+  namespace: voiceops
+data:
+  VOICEOPS_ENV: "kubernetes"
+  LOG_LEVEL: "INFO"
+  REDIS_URL: "redis://redis:6379/0"
+  DATABASE_URL: "postgresql+asyncpg://voiceops:voiceops@postgres:5432/voiceops"
+  WORKER_CONCURRENCY: "8"
+  QUEUE_LEASE_SECONDS: "120"
+  RETRY_MAX_ATTEMPTS: "4"
+  # Admission control: reject new work rather than growing an unbounded backlog.
+  MAX_QUEUE_DEPTH: "50000"
+  MAX_CALL_AGE_SECONDS: "21600"
+  # The carrier, not the workers, is the real throughput ceiling.
+  CARRIER_CALLS_PER_SECOND: "1.0"
+  CARRIER_BURST: "5"
+  CALLING_HOURS_START: "9"
+  CALLING_HOURS_END: "20"
+  CALLING_HOURS_TIMEZONE: "UTC"
+  RETENTION_DAYS: "90"
+  # Providers stay mocked until real credentials are supplied via the secret.
+  STT_PROVIDER: "mock"
+  LLM_PROVIDER: "mock"
+  TTS_PROVIDER: "mock"
+  TELEPHONY_PROVIDER: "mock"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: voiceops-secrets
+  namespace: voiceops
+type: Opaque
+stringData:
+  # Placeholders. In a real cluster these come from a sealed secret or an
+  # external secrets operator, never from a file in the repository.
+  POSTGRES_PASSWORD: "voiceops"
+  # "<key>:<role>,..." with roles viewer/operator/admin. Empty disables auth,
+  # which /health reports so an unprotected deployment is visible.
+  API_KEYS: ""
+  GEMINI_API_KEY: ""
+  DEEPGRAM_API_KEY: ""
+  ANTHROPIC_API_KEY: ""
+  ELEVENLABS_API_KEY: ""
+  TWILIO_ACCOUNT_SID: ""
+  TWILIO_AUTH_TOKEN: ""

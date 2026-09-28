@@ -148,11 +148,17 @@ def _last_user_payload(messages: Sequence[LLMMessage]) -> dict[str, Any]:
 
 
 def _classify(payload: dict[str, Any]) -> dict[str, Any]:
-    """Pick the option whose name/description/examples overlap the utterance most."""
+    """Pick the option whose *distinctive* vocabulary best matches the utterance.
+
+    Only words unique to one option count. A word shared by several options
+    carries no signal about which was meant: in a delivery follow-up every
+    branch mentions "delivery", so scoring on it made "did it arrive?" match
+    the yes branch purely because the customer also said the word.
+    """
     utterance = _tokens(str(payload.get("utterance", "")))
     options: list[dict[str, Any]] = payload.get("options") or []
-    best_name, best_score = None, 0.0
 
+    vocabularies: list[tuple[str, set[str]]] = []
     for option in options:
         vocabulary = _tokens(
             " ".join(
@@ -163,22 +169,41 @@ def _classify(payload: dict[str, Any]) -> dict[str, Any]:
                 ]
             )
         )
-        if not vocabulary:
-            continue
-        overlap = len(utterance & vocabulary)
+        if vocabulary:
+            vocabularies.append((str(option.get("name")), vocabulary))
+
+    # A word appearing in more than one option describes the topic, not the choice.
+    seen: dict[str, int] = {}
+    for _, vocabulary in vocabularies:
+        for word in vocabulary:
+            seen[word] = seen.get(word, 0) + 1
+
+    best_name, best_score, best_coverage = None, 0.0, 0.0
+    for name, vocabulary in vocabularies:
+        distinctive = {w for w in vocabulary if seen[w] == 1}
+        overlap = len(utterance & distinctive)
         if not overlap:
             continue
-        # Normalise by option vocabulary so verbose options do not always win.
-        score = overlap / (len(vocabulary) ** 0.5)
+        # Rank by how much of the option's distinctive vocabulary was hit,
+        # normalised so verbose options do not always win.
+        score = overlap / (len(distinctive) ** 0.5)
         if score > best_score:
-            best_name, best_score = str(option.get("name")), score
+            # Confidence comes from coverage of the *utterance*, not of the
+            # option. One word matching out of a seven-word sentence is a weak
+            # signal however large the option's vocabulary is, and reporting it
+            # as strong is what let "a delivery that hasn't shown up yet" match
+            # a "yes" branch on the single word "delivery".
+            best_name = name
+            best_score = score
+            best_coverage = overlap / max(len(utterance), 1)
 
     if best_name is None:
         return {"intent": None, "confidence": 0.0, "reasoning": "no option matched"}
+    confidence = round(min(0.2 + 0.78 * best_coverage, 0.98), 3)
     return {
         "intent": best_name,
-        "confidence": round(min(0.55 + best_score / 2, 0.98), 3),
-        "reasoning": f"matched {best_name} on shared terms",
+        "confidence": confidence,
+        "reasoning": f"matched {best_name} on {best_coverage:.0%} of the reply",
     }
 
 

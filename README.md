@@ -1,5 +1,7 @@
 # VoiceOps
 
+[![CI](https://github.com/Aarushi-bhatia/VoiceOps/actions/workflows/ci.yml/badge.svg)](https://github.com/Aarushi-bhatia/VoiceOps/actions/workflows/ci.yml)
+
 A voice AI platform for automating customer-support calls. It wires **speech-to-text → LLM → text-to-speech** into a configurable agent workflow, schedules and retries the calls through a **Redis-backed queue**, stores everything in **PostgreSQL**, and gives CX operations a **React dashboard** to configure agents, watch calls, and diagnose failures.
 
 Every provider defaults to a deterministic mock, so the whole system — including real conversations with a simulated customer — runs end to end with **no API keys and no phone line**.
@@ -36,7 +38,36 @@ With no `REDIS_URL` set the queue lives inside the API process, so the API **emb
 docker compose up --build
 ```
 
-Brings up Postgres, Redis, the API, a worker, and the dashboard on <http://localhost:5173>. Scale the call capacity with `docker compose up -d --scale worker=3`.
+Brings up Postgres, Redis, the API, a worker, and the dashboard on <http://localhost:5173>. Scale the call capacity with `docker compose up -d --scale worker=3`. Compose sets the calling policy explicitly — carrier rate limit and calling hours — since those are per-deployment and default to off.
+
+### On Kubernetes
+
+```bash
+kubectl apply -f k8s/
+```
+
+Sixteen objects: Postgres and Redis as StatefulSets with persistent volumes, the API and dashboard as Deployments behind an Ingress, and workers as a Deployment with a HorizontalPodAutoscaler (3 to 20 pods on CPU). See [k8s/README.md](k8s/README.md) for the decisions behind it, including why workers get a 120-second termination grace period.
+
+## Throughput
+
+Measured with `scripts/loadtest.py`, which queues a batch of calls, drains them, and reports what actually happened. This exercises the queue, worker pool, conversation engine and database on one machine against the mock voice stack, so it measures the platform rather than a carrier's round-trip time.
+
+| Calls | Worker concurrency | Throughput | Calls/hour | Turn latency (p50 / p95) |
+| --- | --- | --- | --- | --- |
+| 200 | 4 | 2.1 calls/sec | 7,700 | 173 ms / 268 ms |
+| 200 | 16 | 7.9 calls/sec | 28,500 | 173 ms / 268 ms |
+| 200 | 32 | 15.2 calls/sec | 54,600 | 173 ms / 265 ms |
+| **10,000** | **48** | **26.0 calls/sec** | **93,700** | **173 ms / 268 ms** |
+
+Throughput scales close to linearly with worker concurrency, and per-turn latency is identical at 200 calls and at 10,000 — so the queue and lease machinery are not the bottleneck at this scale. The 10,000-call run (against real Redis) completed in 6m24s with no failures, recording 62,302 conversation turns.
+
+The real ceiling is the carrier, not the platform: a telephony provider typically allows around one call per second per number, so the constraint is numbers and per-number rate limiting rather than worker capacity. That rate limiting is not yet implemented.
+
+Reproduce with:
+
+```bash
+cd backend && python scripts/loadtest.py --calls 500 --concurrency 32
+```
 
 ---
 
@@ -71,6 +102,21 @@ POST /api/v1/calls
 A worker holds a **lease** on each call it is running and heartbeats it. If the worker dies, the lease expires and another worker reclaims the call rather than leaving it stranded.
 
 ---
+
+## Admission control and backpressure
+
+Workers pull only what their concurrency allows, so a slow worker simply stops claiming and the backlog stays in Redis rather than piling up in memory. On the producer side four gates apply:
+
+| Gate | Behaviour |
+| --- | --- |
+| **Queue depth** (`MAX_QUEUE_DEPTH`) | New calls are refused with `429 Too Many Requests` and a `Retry-After` header once the backlog reaches the cap |
+| **Staleness** (`MAX_CALL_AGE_SECONDS`) | A call queued hours ago is dropped rather than placed. A support call answered six hours late is worse than no call |
+| **Carrier rate limit** (`CARRIER_CALLS_PER_SECOND`) | A token bucket per outbound number, shared across workers. Carriers allow roughly one call per second per number, so this — not worker capacity — is the real ceiling |
+| **Calling hours** (`CALLING_HOURS_*`) | Calls outside the window are deferred to the next one, honouring a per-call `timezone` in metadata |
+
+The last two **defer** rather than fail: nothing went wrong with the call, so they must not consume a retry attempt.
+
+Suppressed numbers are refused at creation *and* re-checked before dialling, since the do-not-call list can change while a call waits.
 
 ## The queue
 
@@ -136,7 +182,7 @@ The runtime only talks to four protocols (`app/voice/base.py`), so the stack is 
 | Component | `mock` (default) | Real adapter |
 | --- | --- | --- |
 | STT | Deterministic, replays the mock audio's text | Deepgram |
-| LLM | Rule-based intent classification and field extraction | Anthropic Messages API |
+| LLM | Rule-based intent classification and field extraction | Anthropic Messages API, or Google Gemini |
 | TTS | Silent PCM sized to a real speaking rate | ElevenLabs |
 | Telephony | Simulated customer with scripted personas | Twilio (REST + bidirectional Media Streams) |
 
@@ -161,6 +207,38 @@ Reserved number suffixes make each queue path reproducible — useful for demos 
 
 ---
 
+## Authentication
+
+`API_KEYS` is `<key>:<role>,<key>:<role>` with three roles:
+
+| Role | Can |
+| --- | --- |
+| `viewer` | Read calls, transcripts, queue state and analytics |
+| `operator` | + queue, cancel and retry calls; run a simulation |
+| `admin` | + edit agents, change the do-not-call list, purge the dead-letter queue |
+
+They are separate because transcripts hold personal data and an agent's workflow scripts what customers hear — those should not be the same permission. Present the key as `X-API-Key` or `Authorization: Bearer`.
+
+With no keys configured, authentication is disabled, which keeps local development and the test suite free of ceremony. `/health` reports `auth: enabled|disabled`, so an accidentally unprotected deployment is visible rather than silent.
+
+## Operations
+
+**Migrations.** Alembic, with the URL taken from application settings so it always targets the same database as the app.
+
+```bash
+cd backend && alembic upgrade head
+```
+
+In Kubernetes this is a Job (`k8s/migrate-job.yaml`) run once per release, not per pod. `init_models()` still creates tables on startup for local development and the SQLite fallback.
+
+**Retention.** Transcripts are personal data, so finished calls are deleted on a schedule (nightly CronJob, `RETENTION_DAYS`, default 90):
+
+```bash
+cd backend && python scripts/retention.py --dry-run
+```
+
+**Metrics.** `GET /metrics` exposes Prometheus text: queue depth by state, lifetime queue events, calls by status/outcome/failure category, turn-latency quantiles, and in-flight calls. The two worth alerting on are `voiceops_dead_letter_calls` and a rising `voiceops_queue_depth{state="ready"}`.
+
 ## API
 
 `GET /docs` has the full interactive reference. The shape of it:
@@ -181,6 +259,10 @@ DELETE /api/v1/queue/dead-letter/{id}
 
 GET    /api/v1/analytics/overview  GET /api/v1/analytics/timeseries  GET /api/v1/analytics/agents
 
+GET    /api/v1/suppression         POST /api/v1/suppression
+GET    /api/v1/suppression/{number}  DELETE /api/v1/suppression/{number}
+
+GET    /metrics                    (Prometheus)
 WS     /ws/events                  WS  /ws/twilio/{call_id}
 ```
 
@@ -225,10 +307,20 @@ cd backend && .venv/bin/python -m pytest -q
 ```
 
 ```bash
-cd backend && .venv/bin/ruff check app tests && cd ../frontend && npx eslint src
+cd backend && .venv/bin/ruff check app tests scripts && cd ../frontend && npx eslint src
 ```
 
-The suite covers the queue's ordering/lease/scheduling/dead-letter semantics, the retry policy, workflow validation, the conversation runtime (including mid-call drops and turn limits), the worker end to end, and the HTTP surface. It runs against the in-process queue and SQLite, so it needs no services.
+The suite covers the queue's ordering/lease/scheduling/dead-letter semantics, the retry policy, workflow validation, the conversation runtime (including mid-call drops and turn limits), the worker end to end, and the HTTP surface. By default it runs against the in-process queue and SQLite, so it needs no services.
+
+The same suite runs against the real backends by pointing two environment variables at them:
+
+```bash
+cd backend && VOICEOPS_TEST_REDIS_URL=redis://localhost:6379/15 VOICEOPS_TEST_DATABASE_URL=postgresql+asyncpg://voiceops:voiceops@localhost:5432/voiceops_test .venv/bin/python -m pytest -q
+```
+
+That matters because both alternatives are more forgiving than the real thing. The in-process queue runs Python transliterations rather than the Lua scripts, and SQLite autocommits DDL and does not enforce the CHECK constraints. Two bugs hid behind exactly those differences: a lease leak that caused duplicate calls, and an Alembic configuration that reported success while creating nothing on Postgres.
+
+CI runs all three configurations on every push — in-process, real Redis, and Postgres — plus migrations on both databases, the shutdown test against a real server, the seed and retention scripts, and the dashboard lint and build.
 
 ### Layout
 
@@ -242,6 +334,8 @@ backend/app/
   services/   call lifecycle, analytics, simulation, queue recovery
   voice/      provider protocols + mock and real adapters
   worker/     the worker loop
+k8s/          Kubernetes manifests (namespace, config, datastores, workloads)
+.github/      CI: lint, tests on both queue backends, dashboard build
 frontend/src/
   components/ layout, tables, charts, workflow editor, transcript
   hooks/      data fetching, event stream, theme
@@ -255,4 +349,4 @@ frontend/src/
 - `init_models()` creates tables on startup, which is fine for development and the SQLite fallback. A production deployment should run migrations (Alembic) instead; the models carry an explicit naming convention so generated constraint names stay stable.
 - The in-process queue is single-process by design. A standalone worker refuses to start without `REDIS_URL` rather than silently polling an empty queue.
 - Cost figures are a per-call estimate from a rate table in `app/services/calls.py`. Replace the constants with your contracted rates.
-- There is no authentication on the API — it assumes a trusted network or a gateway in front.
+- The Kubernetes manifests have not been applied to a live cluster. The Docker images build and the full Compose stack runs against Postgres and Redis, but the manifests themselves are unproven.

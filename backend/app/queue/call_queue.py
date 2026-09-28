@@ -97,6 +97,9 @@ COUNTERS = (
     "dead_lettered",
     "reclaimed",
     "canceled",
+    "deferred",
+    "throttled",
+    "rejected",
 )
 
 
@@ -155,6 +158,18 @@ class CallQueue:
         job.scheduled_at_ms = int(retry_at.timestamp() * 1000)
         state = await self.enqueue(job)
         await self.incr_counter("retried")
+        return state
+
+    async def defer(self, job: QueuedCall, until: datetime, *, counter: str = "deferred") -> str:
+        """Put a call back without spending an attempt.
+
+        Used when nothing went wrong with the call itself - the carrier is
+        rate limited, or it is outside calling hours. Charging an attempt for
+        those would exhaust the retry budget without ever having dialled.
+        """
+        job.scheduled_at_ms = int(until.timestamp() * 1000)
+        state = await self.enqueue(job)
+        await self.incr_counter(counter)
         return state
 
     # ----------------------------- consuming -----------------------------

@@ -11,15 +11,26 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import Calls, DbSession, Queue
 from app.core.enums import CallOutcome, CallPriority, CallStatus
+from app.core.security import RequireOperator, RequireViewer
 from app.db.models import Call
 from app.schemas.calls import BulkCallCreate, CallCreate, CallDetail, CallRead
 from app.schemas.common import Page
-from app.services.calls import AgentNotFoundError, CallNotFoundError
+from app.services.calls import (
+    AgentNotFoundError,
+    CallNotFoundError,
+    DoNotCallError,
+    QueueFullError,
+)
 
 router = APIRouter(prefix="/calls", tags=["calls"])
 
 
-@router.post("", response_model=CallRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=CallRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[RequireOperator],
+)
 async def create_call(payload: CallCreate, service: Calls) -> Call:
     try:
         return await service.create_call(
@@ -34,11 +45,24 @@ async def create_call(payload: CallCreate, service: Calls) -> Call:
         )
     except AgentNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except QueueFullError as exc:
+        # Backpressure: tell the producer to slow down rather than growing the
+        # backlog until calls are placed hours after they mattered.
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, str(exc), headers={"Retry-After": "30"}
+        ) from exc
+    except DoNotCallError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
 
-@router.post("/bulk", response_model=list[CallRead], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/bulk",
+    response_model=list[CallRead],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[RequireOperator],
+)
 async def create_calls_bulk(payload: BulkCallCreate, service: Calls) -> list[Call]:
     """Queue a batch of calls for one agent (a campaign)."""
     created: list[Call] = []
@@ -57,12 +81,20 @@ async def create_calls_bulk(payload: BulkCallCreate, service: Calls) -> list[Cal
             )
     except AgentNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except QueueFullError as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"{exc} ({len(created)} of {len(payload.recipients)} queued)",
+            headers={"Retry-After": "30"},
+        ) from exc
+    except DoNotCallError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     return created
 
 
-@router.get("", response_model=Page[CallRead])
+@router.get("", response_model=Page[CallRead], dependencies=[RequireViewer])
 async def list_calls(
     session: DbSession,
     status_in: list[CallStatus] | None = Query(default=None, alias="status"),
@@ -103,7 +135,7 @@ async def list_calls(
     )
 
 
-@router.get("/{call_id}", response_model=CallDetail)
+@router.get("/{call_id}", response_model=CallDetail, dependencies=[RequireViewer])
 async def get_call(call_id: uuid.UUID, session: DbSession, queue: Queue) -> CallDetail:
     call = await session.scalar(
         select(Call)
@@ -119,7 +151,7 @@ async def get_call(call_id: uuid.UUID, session: DbSession, queue: Queue) -> Call
     return detail
 
 
-@router.post("/{call_id}/cancel", response_model=CallRead)
+@router.post("/{call_id}/cancel", response_model=CallRead, dependencies=[RequireOperator])
 async def cancel_call(call_id: uuid.UUID, service: Calls) -> Call:
     try:
         return await service.cancel_call(call_id)
@@ -129,7 +161,7 @@ async def cancel_call(call_id: uuid.UUID, service: Calls) -> Call:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
-@router.post("/{call_id}/retry", response_model=CallRead)
+@router.post("/{call_id}/retry", response_model=CallRead, dependencies=[RequireOperator])
 async def retry_call(
     call_id: uuid.UUID,
     service: Calls,

@@ -1,0 +1,31 @@
+# Schema migrations run once per release, not once per pod. A Job keeps that
+# separate from the Deployments, which must never race each other to migrate.
+#
+#   kubectl apply -f k8s/migrate-job.yaml
+#   kubectl -n voiceops wait --for=condition=complete job/migrate --timeout=5m
+#
+# Then roll the API and workers.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: voiceops
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: migrate }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: alembic
+          image: voiceops-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: { name: voiceops-config }
+            - secretRef: { name: voiceops-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }

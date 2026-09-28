@@ -35,6 +35,7 @@ class HealthStatus(BaseModel):
     database: str
     redis: str
     providers: dict[str, str]
+    auth: str = Field(default="disabled", description="'enabled' or 'disabled'")
 
 
 class OutcomeCount(BaseModel):
@@ -76,6 +77,14 @@ class AnalyticsOverview(BaseModel):
     resolution_rate: float = Field(
         default=0.0, description="Share of completed calls resolved without a human"
     )
+    automation_rate: float = Field(
+        default=0.0,
+        description=(
+            "Share of all attempted calls the agent handled end to end. Unlike "
+            "resolution_rate this counts failures and escalations in the denominator, "
+            "so it is the fraction of the total workload automation actually removed."
+        ),
+    )
     escalation_rate: float = 0.0
     avg_duration_seconds: float = 0.0
     avg_attempts: float = 0.0
@@ -94,6 +103,7 @@ class AgentPerformance(BaseModel):
     resolved: int = 0
     escalated: int = 0
     resolution_rate: float = 0.0
+    automation_rate: float = 0.0
     avg_duration_seconds: float = 0.0
     avg_turns: float = 0.0
     total_cost_cents: float = 0.0

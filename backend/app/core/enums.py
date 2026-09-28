@@ -64,6 +64,7 @@ class FailureCategory(StrEnum):
     DO_NOT_CALL = "do_not_call"  # permanent
     AGENT_CONFIG = "agent_config"  # permanent
     CANCELED = "canceled"  # permanent
+    EXPIRED = "expired"  # permanent - too old to be worth placing
     UNKNOWN = "unknown"  # transient, conservatively
 
     @property
@@ -76,6 +77,7 @@ _PERMANENT = {
     FailureCategory.DO_NOT_CALL,
     FailureCategory.AGENT_CONFIG,
     FailureCategory.CANCELED,
+    FailureCategory.EXPIRED,
 }
 
 
@@ -106,3 +108,5 @@ class EventType(StrEnum):
     RETRY_SCHEDULED = "retry_scheduled"
     DEAD_LETTERED = "dead_lettered"
     CANCELED = "canceled"
+    THROTTLED = "throttled"
+    DEFERRED = "deferred"

@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import AppSettings, DbSession
 from app.core.enums import CallOutcome, CallStatus
+from app.core.security import RequireAdmin, RequireOperator, RequireViewer
 from app.db.models import Agent, Call
 from app.schemas.agents import (
     AgentCreate,
@@ -30,7 +31,9 @@ def _flag(condition):
     return case((condition, 1), else_=0)
 
 
-@router.post("", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=AgentRead, status_code=status.HTTP_201_CREATED, dependencies=[RequireAdmin]
+)
 async def create_agent(payload: AgentCreate, session: DbSession) -> Agent:
     agent = Agent(**payload.model_dump())
     session.add(agent)
@@ -43,7 +46,7 @@ async def create_agent(payload: AgentCreate, session: DbSession) -> Agent:
     return agent
 
 
-@router.get("", response_model=Page[AgentRead])
+@router.get("", response_model=Page[AgentRead], dependencies=[RequireViewer])
 async def list_agents(
     session: DbSession,
     is_active: bool | None = None,
@@ -66,12 +69,12 @@ async def list_agents(
     )
 
 
-@router.get("/{agent_id}", response_model=AgentRead)
+@router.get("/{agent_id}", response_model=AgentRead, dependencies=[RequireViewer])
 async def get_agent(agent_id: uuid.UUID, session: DbSession) -> Agent:
     return await _load(agent_id, session)
 
 
-@router.patch("/{agent_id}", response_model=AgentRead)
+@router.patch("/{agent_id}", response_model=AgentRead, dependencies=[RequireAdmin])
 async def update_agent(agent_id: uuid.UUID, payload: AgentUpdate, session: DbSession) -> Agent:
     agent = await _load(agent_id, session)
     changes = payload.model_dump(exclude_unset=True)
@@ -87,7 +90,7 @@ async def update_agent(agent_id: uuid.UUID, payload: AgentUpdate, session: DbSes
     return agent
 
 
-@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[RequireAdmin])
 async def delete_agent(agent_id: uuid.UUID, session: DbSession) -> None:
     agent = await _load(agent_id, session)
     in_flight = await session.scalar(
@@ -114,7 +117,7 @@ async def delete_agent(agent_id: uuid.UUID, session: DbSession) -> None:
     await session.delete(agent)
 
 
-@router.get("/{agent_id}/stats", response_model=AgentStats)
+@router.get("/{agent_id}/stats", response_model=AgentStats, dependencies=[RequireViewer])
 async def agent_stats(agent_id: uuid.UUID, session: DbSession) -> AgentStats:
     agent = await _load(agent_id, session)
     row = (
@@ -145,7 +148,9 @@ async def agent_stats(agent_id: uuid.UUID, session: DbSession) -> AgentStats:
     )
 
 
-@router.post("/{agent_id}/simulate", response_model=SimulationResult)
+@router.post(
+    "/{agent_id}/simulate", response_model=SimulationResult, dependencies=[RequireOperator]
+)
 async def simulate(
     agent_id: uuid.UUID,
     payload: SimulationRequest,

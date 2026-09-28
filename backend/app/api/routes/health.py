@@ -8,6 +8,7 @@ from fastapi import APIRouter, Response, status
 from sqlalchemy import text
 
 from app.api.deps import AppSettings, DbSession, Queue
+from app.core.security import parse_api_keys
 from app.schemas.ops import HealthStatus
 from app.voice.registry import get_voice_stack
 
@@ -27,6 +28,7 @@ async def health(settings: AppSettings) -> HealthStatus:
         database="unchecked",
         redis="unchecked",
         providers=get_voice_stack(settings).describe(),
+        auth=_auth_state(settings),
     )
 
 
@@ -59,4 +61,10 @@ async def ready(
         database=database,
         redis=redis,
         providers=get_voice_stack(settings).describe(),
+        auth=_auth_state(settings),
     )
+
+
+def _auth_state(settings) -> str:
+    """Surfaced so an accidentally unprotected deployment is visible."""
+    return "enabled" if parse_api_keys(settings.api_keys) else "disabled"

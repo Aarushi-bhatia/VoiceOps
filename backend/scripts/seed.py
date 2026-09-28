@@ -14,7 +14,7 @@ import argparse
 import asyncio
 import random
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -68,7 +68,7 @@ async def seed(*, calls: int, run_worker: bool, reset: bool, seed_value: int) ->
             number, _note = rng.choice(DEMO_NUMBERS)
             scheduled = None
             if index % 9 == 8:
-                scheduled = datetime.now(timezone.utc) + timedelta(minutes=rng.randint(5, 120))
+                scheduled = datetime.now(UTC) + timedelta(minutes=rng.randint(5, 120))
             await service.create_call(
                 agent_id=agent.id,
                 to_number=number,
@@ -115,9 +115,7 @@ def main() -> None:
             "note: REDIS_URL is unset, so this uses the in-process queue. "
             "Calls are driven here and then the queue is discarded on exit."
         )
-    asyncio.run(
-        seed(calls=args.calls, run_worker=args.run, reset=args.reset, seed_value=args.seed)
-    )
+    asyncio.run(seed(calls=args.calls, run_worker=args.run, reset=args.reset, seed_value=args.seed))
 
 
 if __name__ == "__main__":

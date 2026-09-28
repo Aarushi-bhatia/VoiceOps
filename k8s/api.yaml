@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: voiceops
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      containers:
+        - name: api
+          image: voiceops-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: { name: voiceops-config }
+            - secretRef: { name: voiceops-secrets }
+          # Liveness only checks the process is up. Readiness checks Postgres and
+          # Redis are actually reachable, so a pod that has lost its database is
+          # pulled out of the load balancer instead of serving errors.
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { memory: 768Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: voiceops
+spec:
+  selector: { app: api }
+  ports:
+    - port: 8000
+      targetPort: 8000

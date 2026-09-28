@@ -5,22 +5,10 @@ from __future__ import annotations
 import copy
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from app.agents.workflow import DEFAULT_WORKFLOW
 from app.worker.call_worker import CallWorker
 
 API = "/api/v1"
-
-
-@pytest.fixture
-def agent_payload() -> dict:
-    return {
-        "name": "Ava",
-        "description": "Support triage",
-        "system_prompt": "You are Ava.",
-        "workflow": copy.deepcopy(DEFAULT_WORKFLOW),
-    }
 
 
 async def create_agent(client, payload) -> dict:
@@ -280,6 +268,9 @@ async def test_analytics_reflect_completed_calls(client, agent_payload):
     overview = (await client.get(f"{API}/analytics/overview", params={"days": 1})).json()
     assert overview["total_calls"] == 3
     assert overview["completed"] == 3
+    # Automation rate counts every attempted call, so it can never exceed the
+    # resolution rate, which only counts the ones that finished.
+    assert 0.0 <= overview["automation_rate"] <= overview["resolution_rate"] <= 1.0
     assert overview["outcomes"]
     assert overview["turn_latency"]["samples"] > 0
     assert overview["total_cost_cents"] > 0
@@ -311,3 +302,32 @@ async def test_agent_with_queued_calls_cannot_be_deleted(client, agent_payload):
     response = await client.delete(f"{API}/agents/{agent['id']}")
     assert response.status_code == 409
     assert "deactivate it instead" in response.text
+
+
+async def test_metrics_are_exposed_in_prometheus_format(client, agent_payload):
+    agent = await create_agent(client, agent_payload)
+    await client.post(
+        f"{API}/calls", json={"agent_id": agent["id"], "to_number": "+15551110001111"}
+    )
+    worker = CallWorker()
+    await worker.tick()
+    await worker._drain()
+
+    response = await client.get("/metrics")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+
+    body = response.text
+    for name in (
+        "voiceops_queue_depth",
+        "voiceops_queue_events_total",
+        "voiceops_calls",
+        "voiceops_call_outcomes",
+        "voiceops_turn_latency_milliseconds",
+        "voiceops_dead_letter_calls",
+        "voiceops_calls_in_flight",
+    ):
+        assert f"# TYPE {name} " in body, f"{name} missing"
+
+    assert 'voiceops_calls{status="completed"} 1' in body
+    assert 'voiceops_queue_depth{state="ready"} 0' in body

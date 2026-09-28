@@ -9,13 +9,14 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.deps import Calls, Queue
 from app.core.enums import CallStatus, EventType
+from app.core.security import RequireAdmin, RequireOperator, RequireViewer
 from app.schemas.common import Message
 from app.schemas.ops import DeadLetterEntry, QueueStatsRead
 
 router = APIRouter(prefix="/queue", tags=["queue"])
 
 
-@router.get("/stats", response_model=QueueStatsRead)
+@router.get("/stats", response_model=QueueStatsRead, dependencies=[RequireViewer])
 async def queue_stats(queue: Queue) -> QueueStatsRead:
     stats = await queue.stats()
     return QueueStatsRead(
@@ -28,7 +29,7 @@ async def queue_stats(queue: Queue) -> QueueStatsRead:
     )
 
 
-@router.get("/dead-letter", response_model=list[DeadLetterEntry])
+@router.get("/dead-letter", response_model=list[DeadLetterEntry], dependencies=[RequireViewer])
 async def list_dead_letter(
     queue: Queue,
     limit: int = Query(default=50, ge=1, le=200),
@@ -50,7 +51,11 @@ async def list_dead_letter(
     ]
 
 
-@router.post("/dead-letter/{call_id}/requeue", response_model=Message)
+@router.post(
+    "/dead-letter/{call_id}/requeue",
+    response_model=Message,
+    dependencies=[RequireOperator],
+)
 async def requeue_dead_letter(call_id: uuid.UUID, queue: Queue, service: Calls) -> Message:
     """Put a permanently failed call back on the ready queue for another run."""
     job = await queue.requeue_dead(str(call_id))
@@ -72,7 +77,7 @@ async def requeue_dead_letter(call_id: uuid.UUID, queue: Queue, service: Calls) 
     return Message(detail=f"call {call_id} requeued")
 
 
-@router.delete("/dead-letter/{call_id}", response_model=Message)
+@router.delete("/dead-letter/{call_id}", response_model=Message, dependencies=[RequireAdmin])
 async def purge_dead_letter(call_id: uuid.UUID, queue: Queue) -> Message:
     """Drop a call from the dead-letter queue without retrying it."""
     if not await queue.purge_dead_letter(str(call_id)):

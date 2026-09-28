@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: voiceops
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: worker }
+  strategy:
+    # Never take every worker down at once, and give in-flight calls time to
+    # finish rather than cutting customers off mid-sentence.
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      # A call can run for minutes. The worker drains on SIGTERM; this gives it
+      # room to finish before Kubernetes kills it.
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: worker
+          image: voiceops-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.worker.main"]
+          envFrom:
+            - configMapRef: { name: voiceops-config }
+            - secretRef: { name: voiceops-secrets }
+          resources:
+            requests: { cpu: 300m, memory: 256Mi }
+            limits: { memory: 768Mi }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker
+  namespace: voiceops
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      # Calls are long-running; scale in slowly so pods are not cycled while
+      # they are mid-conversation.
+      stabilizationWindowSeconds: 300

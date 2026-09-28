@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: voiceops
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: dashboard }
+  template:
+    metadata:
+      labels: { app: dashboard }
+    spec:
+      containers:
+        - name: dashboard
+          image: voiceops-dashboard:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: voiceops
+spec:
+  selector: { app: dashboard }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: voiceops
+  namespace: voiceops
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+spec:
+  rules:
+    - host: voiceops.local
+      http:
+        paths:
+          # The API and the live event websocket are served on the same origin
+          # as the dashboard, so the browser needs no CORS grant.
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: api, port: { number: 8000 } } }
+          - path: /ws
+            pathType: Prefix
+            backend: { service: { name: api, port: { number: 8000 } } }
+          - path: /health
+            pathType: Prefix
+            backend: { service: { name: api, port: { number: 8000 } } }
+          - path: /docs
+            pathType: Prefix
+            backend: { service: { name: api, port: { number: 8000 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: dashboard, port: { number: 80 } } }

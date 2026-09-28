@@ -24,8 +24,18 @@ from app.voice.tts.mock import MockTextToSpeech
 
 @pytest.fixture
 def settings(tmp_path, monkeypatch) -> Settings:
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    monkeypatch.delenv("REDIS_URL", raising=False)
+    # Point VOICEOPS_TEST_DATABASE_URL at a Postgres server to run the same
+    # suite against it; each test still gets its own schema-fresh database via
+    # a unique name. Unset, the suite uses a throwaway SQLite file and needs
+    # no services.
+    postgres = os.getenv("VOICEOPS_TEST_DATABASE_URL")
+    if postgres:
+        monkeypatch.setenv("DATABASE_URL", postgres)
+    else:
+        monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
+    # Empty, not deleted: an explicit env var outranks a developer's .env
+    # file, so the suite behaves the same on every machine.
+    monkeypatch.setenv("REDIS_URL", "")
     monkeypatch.setenv("QUEUE_NAMESPACE", "test")
     monkeypatch.setenv("MOCK_LATENCY_SCALE", "0")
     monkeypatch.setenv("WORKER_POLL_INTERVAL_MS", "10")
@@ -99,10 +109,34 @@ def stack(settings: Settings) -> VoiceStack:
 
 
 @pytest.fixture
-async def db(settings: Settings):
+async def clean_database(settings: Settings):
+    """Give every test an empty schema.
+
+    SQLite gets this for free - each test has its own file. A shared Postgres
+    does not, so the tables are truncated first. Anything that touches the
+    database depends on this, including the API client.
+    """
     await init_models()
+    if os.getenv("VOICEOPS_TEST_DATABASE_URL"):
+        await _truncate_all()
+    yield
+
+
+@pytest.fixture
+async def db(clean_database):
     async with get_sessionmaker()() as session:
         yield session
+
+
+async def _truncate_all() -> None:
+    from sqlalchemy import text
+
+    from app.db.base import Base
+    from app.db.session import get_engine
+
+    names = ", ".join(table.name for table in reversed(Base.metadata.sorted_tables))
+    async with get_engine().begin() as conn:
+        await conn.execute(text(f"TRUNCATE {names} RESTART IDENTITY CASCADE"))
 
 
 @pytest.fixture
@@ -121,7 +155,7 @@ async def agent(db) -> Agent:
 
 @pytest.fixture
 async def client(
-    settings: Settings, queue: CallQueue, stack: VoiceStack
+    settings: Settings, queue: CallQueue, stack: VoiceStack, clean_database
 ) -> AsyncIterator[AsyncClient]:
     from app.main import create_app
 
@@ -133,3 +167,16 @@ async def client(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as http_client:
             yield http_client
+
+
+@pytest.fixture
+def agent_payload() -> dict:
+    """Body for creating an agent over the API."""
+    import copy
+
+    return {
+        "name": "Ava",
+        "description": "Support triage",
+        "system_prompt": "You are Ava.",
+        "workflow": copy.deepcopy(DEFAULT_WORKFLOW),
+    }

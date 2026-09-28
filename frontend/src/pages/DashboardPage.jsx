@@ -32,7 +32,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <StatCard label="Calls" value={formatNumber(data.total_calls)} hint={`${formatNumber(data.in_flight)} in flight`} />
         <StatCard
           label="Connect rate"
@@ -41,10 +41,15 @@ export default function DashboardPage() {
           accent="var(--series-1)"
         />
         <StatCard
+          label="Automation rate"
+          value={formatPercent(data.automation_rate)}
+          hint="of all calls attempted"
+          accent="var(--status-good)"
+        />
+        <StatCard
           label="Resolved without a human"
           value={formatPercent(data.resolution_rate)}
           hint={`${formatPercent(data.escalation_rate)} escalated`}
-          accent="var(--status-good)"
         />
         <StatCard label="Avg call length" value={formatDuration(data.avg_duration_seconds)} hint={`${data.avg_attempts} attempts avg`} />
         <StatCard label="Spend" value={formatCents(data.total_cost_cents)} hint="STT + LLM + TTS + telephony" />
