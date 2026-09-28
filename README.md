@@ -112,10 +112,3 @@ cd backend && .venv/bin/python scripts/retention.py --dry-run
 ```
 
 Measured at **26 calls/sec with 48 workers** on one machine (10,000 calls, no failures, per-turn latency flat versus a 200-call run). The real ceiling is the carrier: roughly one call per second per number.
-
-## What isn't done
-
-- Never deployed. The Docker images build and the Compose stack runs against Postgres, but the Kubernetes manifests in `k8s/` have not been applied to a cluster.
-- STT, TTS and telephony have only ever run as mocks. They are interdependent — transcription needs real audio, which needs real telephony, which needs a paid number. The LLM has been run for real.
-- STT and TTS go one utterance per HTTP request rather than streaming, which is the main source of per-turn latency.
-- No inbound calls, no barge-in, no do-not-call list beyond the local one.
