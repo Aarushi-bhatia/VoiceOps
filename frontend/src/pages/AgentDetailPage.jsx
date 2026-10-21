@@ -94,7 +94,7 @@ export default function AgentDetailPage() {
           <button type="button" onClick={runSimulation} disabled={simulate.isPending} className="focus-ring rounded-md border px-3 py-1.5 text-sm disabled:opacity-50" style={{ borderColor: 'var(--border)' }}>
             {simulate.isPending ? 'Running…' : 'Test conversation'}
           </button>
-          <button type="button" onClick={save} disabled={!dirty || update.isPending} className="focus-ring rounded-md px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40" style={{ background: 'var(--series-1)' }}>
+          <button type="button" onClick={save} disabled={!dirty || update.isPending} className="focus-ring rounded-md px-3 py-1.5 text-sm font-medium text-(--on-accent) disabled:opacity-40" style={{ background: 'var(--series-1)' }}>
             {update.isPending ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
           </button>
         </div>

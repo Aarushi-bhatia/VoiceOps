@@ -93,7 +93,7 @@ export default function WorkflowEditor({ workflow, onChange }) {
           </p>
         ) : null}
         <div className="flex gap-2">
-          <button type="button" onClick={applyRaw} className="focus-ring rounded-md px-3 py-1.5 text-sm text-white" style={{ background: 'var(--series-1)' }}>
+          <button type="button" onClick={applyRaw} className="focus-ring rounded-md px-3 py-1.5 text-sm text-(--on-accent)" style={{ background: 'var(--series-1)' }}>
             Apply JSON
           </button>
           <button type="button" onClick={() => setRawMode(false)} className="focus-ring rounded-md border px-3 py-1.5 text-sm" style={{ borderColor: 'var(--border)' }}>

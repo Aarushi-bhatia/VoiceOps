@@ -128,7 +128,7 @@ export default function CallDrawer({ callId, onClose }) {
                 type="button"
                 disabled={!terminal || retry.isPending}
                 onClick={() => retry.mutate(call.id)}
-                className="focus-ring rounded-md px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                className="focus-ring rounded-md px-3 py-1.5 text-sm text-(--on-accent) disabled:opacity-40"
                 style={{ background: 'var(--series-1)' }}
               >
                 Retry now

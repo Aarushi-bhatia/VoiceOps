@@ -12,7 +12,6 @@ key                     type   contents
 ``q:meta``              hash   call_id -> priority rank
 ``q:dlq`` / ``q:dlq:jobs``  zset/hash  permanently failed calls, newest last
 ``stats:<name>``        int    monotonic counters surfaced by the dashboard
-``events``              chan   pub/sub channel for live dashboard updates
 ======================  =====  =====================================================
 """
 
@@ -21,10 +20,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
-from typing import Any
+from datetime import datetime
 
 from app.core.config import Settings, get_settings
 from app.core.enums import CallPriority
@@ -81,7 +78,6 @@ class QueueKeys:
         self.meta = f"{namespace}:q:meta"
         self.dlq = f"{namespace}:q:dlq"
         self.dlq_jobs = f"{namespace}:q:dlq:jobs"
-        self.events = f"{namespace}:events"
         self.stats_prefix = f"{namespace}:stats:"
 
     def stat(self, name: str) -> str:
@@ -321,13 +317,6 @@ class CallQueue:
             dead_letter=await self.redis.zcard(self.keys.dlq),
             counters=counters,
         )
-
-    async def publish_event(self, event: dict[str, Any]) -> None:
-        event.setdefault("ts", datetime.now(UTC).isoformat())
-        await self.redis.publish(self.keys.events, json.dumps(event, default=str))
-
-    def listen_events(self) -> AsyncIterator[str]:
-        return self.redis.listen(self.keys.events)
 
     async def incr_counter(self, counter: str, amount: int = 1) -> None:
         """Bump one of the dashboard counters in :data:`COUNTERS`."""

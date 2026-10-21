@@ -71,9 +71,7 @@ async def requeue_dead_letter(call_id: uuid.UUID, queue: Queue, service: Calls) 
     call.failure_reason = None
     call.next_retry_at = None
     call.ended_at = None
-    await service.record_event(
-        call, EventType.ENQUEUED, {"requeued_from": "dead_letter"}, publish=True
-    )
+    await service.record_event(call, EventType.ENQUEUED, {"requeued_from": "dead_letter"})
     return Message(detail=f"call {call_id} requeued")
 
 

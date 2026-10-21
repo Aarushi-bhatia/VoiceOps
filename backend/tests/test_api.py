@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.agents.workflow import DEFAULT_WORKFLOW
 from app.worker.call_worker import CallWorker
 
@@ -145,6 +147,45 @@ async def test_call_for_an_unknown_agent_is_404(client):
         json={"agent_id": "00000000-0000-0000-0000-000000000000", "to_number": "+15551111"},
     )
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "number",
+    ["abc123", "15551111", "+0155511111", "+1555", "+1234567890123456"],
+)
+async def test_a_malformed_number_is_rejected_before_it_is_queued(
+    client, agent_payload, queue, number
+):
+    agent = await create_agent(client, agent_payload)
+    response = await client.post(
+        f"{API}/calls", json={"agent_id": agent["id"], "to_number": number}
+    )
+    assert response.status_code == 422
+    assert "international format" in response.text
+    assert (await queue.stats()).backlog == 0
+
+
+async def test_a_formatted_number_is_stored_in_dialable_form(client, agent_payload):
+    agent = await create_agent(client, agent_payload)
+    response = await client.post(
+        f"{API}/calls", json={"agent_id": agent["id"], "to_number": "+1 (415) 555-0123"}
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["to_number"] == "+14155550123"
+
+
+async def test_one_malformed_recipient_rejects_the_whole_batch(client, agent_payload, queue):
+    agent = await create_agent(client, agent_payload)
+    response = await client.post(
+        f"{API}/calls/bulk",
+        json={
+            "agent_id": agent["id"],
+            "recipients": [{"to_number": "+15551111"}, {"to_number": "not a number"}],
+        },
+    )
+    assert response.status_code == 422
+    assert ["body", "recipients", 1, "to_number"] in [e["loc"] for e in response.json()["detail"]]
+    assert (await queue.stats()).backlog == 0
 
 
 async def test_inactive_agent_cannot_receive_calls(client, agent_payload):

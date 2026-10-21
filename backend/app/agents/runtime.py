@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,8 +37,6 @@ from app.core.enums import CallOutcome, TurnRole
 from app.voice.base import CallSession, TelephonyError, VoiceStack
 
 logger = logging.getLogger(__name__)
-
-EventHook = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 @dataclass
@@ -93,13 +90,7 @@ class ConversationResult:
 
 
 class ConversationRuntime:
-    def __init__(
-        self,
-        stack: VoiceStack,
-        config: AgentConfig,
-        *,
-        on_event: EventHook | None = None,
-    ) -> None:
+    def __init__(self, stack: VoiceStack, config: AgentConfig) -> None:
         self.stack = stack
         self.config = config
         self.nlu = NLU(
@@ -108,7 +99,6 @@ class ConversationRuntime:
             model=config.llm_model,
             temperature=config.temperature,
         )
-        self._on_event = on_event
 
     async def run(
         self, session: CallSession, *, context: dict[str, Any] | None = None
@@ -127,7 +117,6 @@ class ConversationRuntime:
                     break
 
                 state.node_path.append(node.id)
-                await self._emit("node_entered", {"node_id": node.id, "type": str(node.type)})
                 node = await self._step(session, state, node)
             else:
                 # Left the graph without reaching a transfer or hangup node.
@@ -186,7 +175,6 @@ class ConversationRuntime:
             state.outcome = node.outcome
             state.transferred_to = node.destination
             state.ended_reason = f"transferred to {node.destination}"
-            await self._emit("transferred", {"destination": node.destination})
             return None
 
         if isinstance(node, HangupNode):
@@ -219,10 +207,6 @@ class ConversationRuntime:
             state.attach_llm_latency(llm.latency_ms)
             if value is not None:
                 state.collected[node.field] = value
-                await self._emit(
-                    "field_collected",
-                    {"field": node.field, "value": value, "confidence": confidence},
-                )
                 return workflow.node(node.next) if node.next else None
 
         logger.info("collect node gave up", extra={"node_id": node.id, "field": node.field})
@@ -248,14 +232,8 @@ class ConversationRuntime:
             state.attach_llm_latency(llm.latency_ms)
 
             if intent is not None and confidence >= node.min_confidence:
-                await self._emit("intent_matched", {"intent": intent, "confidence": confidence})
                 target = next(i.next for i in node.intents if i.name == intent)
                 return workflow.node(target)
-
-            await self._emit(
-                "intent_unmatched",
-                {"node_id": node.id, "utterance": utterance, "confidence": confidence},
-            )
 
         return workflow.node(node.default)
 
@@ -279,7 +257,6 @@ class ConversationRuntime:
                 latency_ms=synthesis.latency_ms,
             )
         )
-        await self._emit("turn", {"role": "agent", "text": text, "node_id": node_id})
 
     async def _hear(self, session: CallSession, state: _RunState, node_id: str) -> str:
         audio = await session.listen(timeout_seconds=8.0)
@@ -296,7 +273,6 @@ class ConversationRuntime:
                 confidence=transcription.confidence,
             )
         )
-        await self._emit("turn", {"role": "customer", "text": text, "node_id": node_id})
         return text
 
     # ------------------------------- misc --------------------------------
@@ -335,10 +311,6 @@ class ConversationRuntime:
                 await session.hangup()
         except Exception as exc:  # noqa: BLE001 - hangup is best effort
             logger.debug("hangup failed", extra={"error": str(exc)})
-
-    async def _emit(self, name: str, payload: dict[str, Any]) -> None:
-        if self._on_event is not None:
-            await self._on_event(name, payload)
 
 
 _GUARD_MESSAGE = "I'm sorry, I'm not able to finish this here. Let me get someone to call you back."

@@ -2,19 +2,48 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic_core import PydanticCustomError
 
 from app.core.enums import CallOutcome, CallPriority, CallStatus, FailureCategory
+
+# E.164: a plus, a country code that never starts with 0, and 15 digits at most.
+# Seven is a practical floor - nothing shorter is a dialable international number.
+_E164 = re.compile(r"\+[1-9]\d{6,14}")
+_FORMATTING = re.compile(r"[\s\-().]")
+
+
+def _phone_number(value: str) -> str:
+    """Accept the way people type numbers, store the one form carriers dial.
+
+    Catching a malformed number here costs nothing; letting it through costs a
+    queue slot, a worker and a carrier round trip before it dead-letters. A
+    well-formed number the carrier still rejects goes to the dead letter queue
+    as before - only the carrier knows whether a number is in service.
+    """
+    cleaned = _FORMATTING.sub("", value)
+    if not _E164.fullmatch(cleaned):
+        raise PydanticCustomError(
+            "phone_number",
+            "'{value}' is not a valid phone number. Use international format: "
+            "+, the country code, then the number, e.g. +14155550123",
+            {"value": value},
+        )
+    return cleaned
+
+
+PhoneNumber = Annotated[str, Field(max_length=32), AfterValidator(_phone_number)]
 
 
 class CallCreate(BaseModel):
     agent_id: uuid.UUID
-    to_number: str = Field(min_length=3, max_length=32)
-    from_number: str | None = Field(default=None, max_length=32)
+    to_number: PhoneNumber
+    from_number: PhoneNumber | None = None
     priority: CallPriority = CallPriority.NORMAL
     scheduled_at: datetime | None = Field(
         default=None, description="Hold the call until this time (UTC)"
@@ -37,7 +66,7 @@ class BulkCallCreate(BaseModel):
 
 
 class CallRecipient(BaseModel):
-    to_number: str = Field(min_length=3, max_length=32)
+    to_number: PhoneNumber
     metadata: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str | None = Field(default=None, max_length=128)
 

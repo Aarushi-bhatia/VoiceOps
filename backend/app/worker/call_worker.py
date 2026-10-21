@@ -44,6 +44,7 @@ class CallWorker:
         stack: VoiceStack | None = None,
         worker_id: str | None = None,
     ) -> None:
+        # constructing the worker
         self.settings = settings or get_settings()
         self.queue = queue or get_queue()
         self.stack = stack or get_voice_stack(self.settings)
@@ -146,6 +147,7 @@ class CallWorker:
                 return
 
     async def _execute(self, job: QueuedCall) -> None:
+        # load and validate the call using the database
         attempt = job.attempt + 1
         async with session_scope() as session:
             service = CallService(session, self.queue)
@@ -173,7 +175,6 @@ class CallWorker:
 
             await service.mark_dialing(call, attempt)
             call_context = {"to_number": call.to_number, **(call.call_metadata or {})}
-            agent_id = call.agent_id
 
         # Dialling and the conversation happen outside the DB transaction so a
         # multi-minute call does not hold a connection open.
@@ -190,22 +191,12 @@ class CallWorker:
             await self._handle_failure(job, category=exc.category, reason=str(exc))
             return
 
-        async def emit(name: str, payload: dict) -> None:
-            await self.queue.publish_event(
-                {
-                    "type": name,
-                    "call_id": job.call_id,
-                    "agent_id": str(agent_id),
-                    "payload": payload,
-                }
-            )
-
         async with session_scope() as session:
             service = CallService(session, self.queue)
             call = await service.get_call(uuid.UUID(job.call_id))
             await service.mark_answered(call, session_handle.external_id)
 
-        runtime = ConversationRuntime(self.stack, config, on_event=emit)
+        runtime = ConversationRuntime(self.stack, config)
         try:
             result = await runtime.run(session_handle, context=call_context)
         except VoiceProviderError as exc:

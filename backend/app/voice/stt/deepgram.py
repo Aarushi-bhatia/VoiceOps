@@ -45,10 +45,11 @@ class DeepgramSpeechToText:
                     "language": language,
                     "smart_format": "true",
                     "punctuate": "true",
+                    **_raw_audio_params(audio),
                 },
                 headers={
                     "Authorization": f"Token {self.api_key}",
-                    "Content-Type": _content_type(audio),
+                    "Content-Type": "application/octet-stream",
                 },
                 content=audio.data,
             )
@@ -86,14 +87,17 @@ class DeepgramSpeechToText:
         await self._client.aclose()
 
 
-def _content_type(audio: AudioChunk) -> str:
-    """Map the chunk's wire format onto a Deepgram content type."""
-    base = {
-        "pcm_s16le": "audio/l16",
-        "mulaw": "audio/x-mulaw",
-        "alaw": "audio/x-alaw",
-    }.get(audio.encoding, "audio/l16")
-    return f"{base};rate={audio.sample_rate}"
+def _raw_audio_params(audio: AudioChunk) -> dict[str, str]:
+    """Describe headerless call audio to Deepgram.
+
+    Phone audio arrives as bare samples with no container to sniff, so Deepgram
+    rejects it as corrupt unless the request states the encoding and rate; a
+    Content-Type alone is not enough.
+    """
+    encoding = {"pcm_s16le": "linear16", "mulaw": "mulaw", "alaw": "alaw"}.get(
+        audio.encoding, "linear16"
+    )
+    return {"encoding": encoding, "sample_rate": str(audio.sample_rate), "channels": "1"}
 
 
 def _first_alternative(body: dict) -> dict:

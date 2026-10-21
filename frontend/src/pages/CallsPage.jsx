@@ -49,7 +49,7 @@ export default function CallsPage() {
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="focus-ring rounded-md px-3 py-1.5 text-sm font-medium text-white"
+          className="focus-ring rounded-md px-3 py-1.5 text-sm font-medium text-(--on-accent)"
           style={{ background: 'var(--series-1)' }}
         >
           Queue a call

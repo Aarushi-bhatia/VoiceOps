@@ -197,22 +197,6 @@ async def test_summary_is_generated_for_a_real_conversation():
     assert "ORD-11111" in result.summary
 
 
-async def test_events_are_emitted_for_each_node_and_turn():
-    seen: list[tuple[str, dict]] = []
-
-    async def hook(name, payload):
-        seen.append((name, payload))
-
-    session = ScriptedSession(["I need a refund for a damaged order", "ORD-22222", "yes"])
-    await ConversationRuntime(build_stack(), config(DEFAULT_WORKFLOW), on_event=hook).run(session)
-
-    names = [n for n, _ in seen]
-    assert "node_entered" in names
-    assert "turn" in names
-    assert "intent_matched" in names
-    assert "field_collected" in names
-
-
 @pytest.mark.parametrize(
     ("number", "expected"),
     [("+15550000", "invalid_number"), ("+15559999", "no_answer"), ("+15558888", "busy")],

@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import DataTable from '../components/DataTable'
 import { EmptyState, ErrorState } from '../components/Feedback'
-import LiveEvents from '../components/LiveEvents'
 import Panel from '../components/Panel'
 import StatCard from '../components/StatCard'
 import { useCallMutations, useDeadLetter, useQueueStats } from '../hooks/useApi'
@@ -47,27 +46,21 @@ export default function QueuePage() {
         />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Panel title="Lifetime counters" description="Since the queue was last reset" className="xl:col-span-2">
-          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {['enqueued', 'claimed', 'completed', 'retried', 'failed', 'dead_lettered', 'reclaimed', 'canceled'].map((key) => (
-              <div key={key} className="rounded-lg p-3" style={{ background: 'var(--surface-sunken)' }}>
-                <dt className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {titleCase(key)}
-                </dt>
-                <dd className="tabular mt-0.5 text-xl font-semibold">{formatNumber(counters[key] || 0)}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <strong>Reclaimed</strong> counts calls whose worker lease expired mid-call — they are re-queued automatically.
-          </p>
-        </Panel>
-
-        <Panel title="Live activity">
-          <LiveEvents limit={30} />
-        </Panel>
-      </div>
+      <Panel title="Lifetime counters" description="Since the queue was last reset">
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {['enqueued', 'claimed', 'completed', 'retried', 'failed', 'dead_lettered', 'reclaimed', 'canceled'].map((key) => (
+            <div key={key} className="rounded-lg p-3" style={{ background: 'var(--surface-sunken)' }}>
+              <dt className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {titleCase(key)}
+              </dt>
+              <dd className="tabular mt-0.5 text-xl font-semibold">{formatNumber(counters[key] || 0)}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+          <strong>Reclaimed</strong> counts calls whose worker lease expired mid-call — they are re-queued automatically.
+        </p>
+      </Panel>
 
       <Panel
         title="Dead letter queue"
@@ -94,7 +87,7 @@ export default function QueuePage() {
                     type="button"
                     disabled={busyId === row.call_id}
                     onClick={() => act(requeue, row.call_id)}
-                    className="focus-ring rounded-md px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                    className="focus-ring rounded-md px-2 py-1 text-xs font-medium text-(--on-accent) disabled:opacity-50"
                     style={{ background: 'var(--series-1)' }}
                   >
                     Requeue

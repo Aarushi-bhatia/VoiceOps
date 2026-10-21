@@ -108,10 +108,7 @@ class CallService:
 
         await self.queue.enqueue(self._job_for(call))
         await self.record_event(
-            call,
-            EventType.ENQUEUED,
-            {"priority": str(priority), "scheduled_at": scheduled_at},
-            publish=True,
+            call, EventType.ENQUEUED, {"priority": str(priority), "scheduled_at": scheduled_at}
         )
         return call
 
@@ -139,7 +136,7 @@ class CallService:
         call.failure_category = FailureCategory.CANCELED
         call.failure_reason = "canceled by operator"
         await self.queue.cancel(str(call.id))
-        await self.record_event(call, EventType.CANCELED, {}, publish=True)
+        await self.record_event(call, EventType.CANCELED, {})
         return call
 
     async def retry_call(self, call_id: uuid.UUID, *, reset_attempts: bool = False) -> Call:
@@ -161,7 +158,7 @@ class CallService:
         # The call may still be sitting in the dead-letter queue.
         await self.queue.purge_dead_letter(str(call.id))
         await self.queue.enqueue(self._job_for(call))
-        await self.record_event(call, EventType.ENQUEUED, {"manual_retry": True}, publish=True)
+        await self.record_event(call, EventType.ENQUEUED, {"manual_retry": True})
         return call
 
     # ------------------------------ recording -----------------------------
@@ -170,16 +167,12 @@ class CallService:
         call.status = CallStatus.DIALING
         call.attempt = attempt
         call.started_at = _utcnow()
-        await self.record_event(
-            call, EventType.DIALING, {"attempt": attempt, "to": call.to_number}, publish=True
-        )
+        await self.record_event(call, EventType.DIALING, {"attempt": attempt, "to": call.to_number})
 
     async def mark_answered(self, call: Call, external_id: str) -> None:
         call.status = CallStatus.IN_PROGRESS
         call.external_id = external_id
-        await self.record_event(
-            call, EventType.ANSWERED, {"external_id": external_id}, publish=True
-        )
+        await self.record_event(call, EventType.ANSWERED, {"external_id": external_id})
 
     async def record_result(self, call: Call, result: Any) -> None:
         """Persist a :class:`~app.agents.runtime.ConversationResult`."""
@@ -218,7 +211,6 @@ class CallService:
                 "ended_reason": result.ended_reason,
                 "duration_seconds": round(result.duration_seconds, 2),
             },
-            publish=True,
         )
 
     async def record_failure(
@@ -245,7 +237,6 @@ class CallService:
                 call,
                 EventType.DEAD_LETTERED,
                 {"category": str(category), "reason": reason, "attempt": attempt},
-                publish=True,
             )
         else:
             call.status = CallStatus.RETRYING
@@ -259,7 +250,6 @@ class CallService:
                     "attempt": attempt,
                     "retry_at": retry_at,
                 },
-                publish=True,
             )
 
     async def record_event(
@@ -267,21 +257,9 @@ class CallService:
         call: Call,
         event_type: EventType,
         payload: dict[str, Any] | None = None,
-        *,
-        publish: bool = False,
     ) -> CallEvent:
         event = CallEvent(call_id=call.id, type=event_type, payload=_jsonable(payload or {}))
         self.session.add(event)
-        if publish:
-            await self.queue.publish_event(
-                {
-                    "type": str(event_type),
-                    "call_id": str(call.id),
-                    "agent_id": str(call.agent_id),
-                    "status": str(call.status),
-                    "payload": _jsonable(payload or {}),
-                }
-            )
         return event
 
     # ------------------------------ reading -------------------------------

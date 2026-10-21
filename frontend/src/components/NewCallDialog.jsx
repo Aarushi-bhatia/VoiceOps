@@ -129,7 +129,7 @@ export default function NewCallDialog({ agents, onClose }) {
           <button type="button" onClick={onClose} className="focus-ring rounded-md border px-3 py-1.5 text-sm" style={{ borderColor: 'var(--border)' }}>
             Cancel
           </button>
-          <button type="submit" disabled={pending} className="focus-ring rounded-md px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50" style={{ background: 'var(--series-1)' }}>
+          <button type="submit" disabled={pending} className="focus-ring rounded-md px-3 py-1.5 text-sm font-medium text-(--on-accent) disabled:opacity-50" style={{ background: 'var(--series-1)' }}>
             {pending ? 'Queueing…' : parsed.length > 1 ? `Queue ${parsed.length} calls` : 'Queue call'}
           </button>
         </div>

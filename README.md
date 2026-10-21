@@ -95,7 +95,7 @@ Full API reference at `/docs`. Prometheus metrics at `/metrics`.
 cd backend && .venv/bin/python -m pytest -q
 ```
 
-145 tests, no services needed. The same suite runs against the real backends:
+143 tests, no services needed. The same suite runs against the real backends:
 
 ```bash
 VOICEOPS_TEST_REDIS_URL=redis://localhost:6379/15 \

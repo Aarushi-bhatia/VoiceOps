@@ -77,9 +77,3 @@ export const api = {
   timeseries: (params) => request('/analytics/timeseries', { params }),
   agentPerformance: (params) => request('/analytics/agents', { params }),
 }
-
-export function eventStreamUrl() {
-  if (BASE) return `${BASE.replace(/^http/, 'ws')}/ws/events`
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${protocol}://${window.location.host}/ws/events`
-}

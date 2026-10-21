@@ -1,4 +1,4 @@
-"""Live event stream for the dashboard, and Twilio's media-stream socket."""
+"""Twilio's media-stream socket."""
 
 from __future__ import annotations
 
@@ -8,16 +8,14 @@ import logging
 import signal
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-
-from app.queue.call_queue import get_queue
+from fastapi import APIRouter, WebSocket
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["events"])
 
-# Set when the application is shutting down. Event-stream handlers race their
-# next message against this, so they return promptly instead of blocking a
-# graceful shutdown while waiting on Redis for a message that may never come.
+# Set when the application is shutting down. The media-stream handler races the
+# end of its call against this, so it returns promptly instead of blocking a
+# graceful shutdown while it waits for a call that may never finish.
 _shutting_down = asyncio.Event()
 _previous_handlers: dict[int, Any] = {}
 
@@ -66,44 +64,6 @@ def restore_shutdown_signal_handlers() -> None:
         with contextlib.suppress(ValueError, OSError, TypeError):
             signal.signal(signum, previous)
     _previous_handlers.clear()
-
-
-@router.websocket("/ws/events")
-async def call_events(websocket: WebSocket) -> None:
-    """Fan out queue and call events published by the workers.
-
-    Messages are the JSON documents written by ``CallQueue.publish_event``:
-    ``{type, call_id, agent_id, status, payload, ts}``.
-    """
-    await websocket.accept()
-    stream = get_queue().listen_events()
-    stopping = asyncio.create_task(_shutting_down.wait(), name="events-shutdown-watch")
-
-    try:
-        while not _shutting_down.is_set():
-            message = asyncio.create_task(anext(stream), name="events-next")
-            done, _ = await asyncio.wait({message, stopping}, return_when=asyncio.FIRST_COMPLETED)
-            if message not in done:
-                # Shutting down: abandon the pending read and let the handler end.
-                message.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await message
-                break
-            await websocket.send_text(message.result())
-    except (WebSocketDisconnect, StopAsyncIteration):
-        pass
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - never take the API down for one socket
-        logger.info("event socket closed", extra={"error": str(exc)})
-    finally:
-        stopping.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await stopping
-        with contextlib.suppress(Exception):
-            await stream.aclose()
-        with contextlib.suppress(Exception):
-            await websocket.close()
 
 
 @router.websocket("/ws/twilio/{call_id}")

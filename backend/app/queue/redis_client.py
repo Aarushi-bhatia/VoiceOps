@@ -20,7 +20,7 @@ import fnmatch
 import logging
 import time
 from collections import defaultdict
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -58,9 +58,7 @@ class RedisBackend(Protocol):
     async def set(self, key: str, value: str) -> bool: ...
     async def delete(self, *keys: str) -> int: ...
     async def keys(self, pattern: str) -> list[str]: ...
-    async def publish(self, channel: str, message: str) -> int: ...
     async def run_script(self, script: Script, keys: list[str], args: list[Any]) -> Any: ...
-    def listen(self, channel: str) -> AsyncIterator[str]: ...
     async def close(self) -> None: ...
 
 
@@ -144,26 +142,12 @@ class RealRedis:
     async def keys(self, pattern: str) -> list[str]:
         return list(await self._client.keys(pattern))
 
-    async def publish(self, channel: str, message: str) -> int:
-        return int(await self._client.publish(channel, message))
-
     async def run_script(self, script: Script, keys: list[str], args: list[Any]) -> Any:
         registered = self._scripts.get(script.name)
         if registered is None:
             registered = self._client.register_script(script.lua)
             self._scripts[script.name] = registered
         return await registered(keys=keys, args=[str(a) for a in args])
-
-    async def listen(self, channel: str) -> AsyncIterator[str]:
-        pubsub = self._client.pubsub(ignore_subscribe_messages=True)
-        await pubsub.subscribe(channel)
-        try:
-            async for message in pubsub.listen():
-                if message and message.get("type") == "message":
-                    yield message["data"]
-        finally:
-            await pubsub.unsubscribe(channel)
-            await pubsub.aclose()
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -180,7 +164,6 @@ class InMemoryRedis:
         self._z: dict[str, dict[str, float]] = defaultdict(dict)
         self._h: dict[str, dict[str, str]] = defaultdict(dict)
         self._kv: dict[str, str] = {}
-        self._channels: dict[str, list[asyncio.Queue[str]]] = defaultdict(list)
         self._lock = asyncio.Lock()
 
     # -- introspection used by the script fallbacks (already under the lock) --
@@ -313,30 +296,6 @@ class InMemoryRedis:
             names = set(self._z) | set(self._h) | set(self._kv)
             return [n for n in names if fnmatch.fnmatch(n, pattern)]
 
-    async def publish(self, channel: str, message: str) -> int:
-        async with self._lock:
-            subscribers = list(self._channels.get(channel, []))
-        for queue in subscribers:
-            queue.put_nowait(message)
-        return len(subscribers)
-
-    def subscribe(self, channel: str) -> asyncio.Queue[str]:
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1000)
-        self._channels[channel].append(queue)
-        return queue
-
-    def unsubscribe(self, channel: str, queue: asyncio.Queue[str]) -> None:
-        if queue in self._channels.get(channel, []):
-            self._channels[channel].remove(queue)
-
-    async def listen(self, channel: str) -> AsyncIterator[str]:
-        queue = self.subscribe(channel)
-        try:
-            while True:
-                yield await queue.get()
-        finally:
-            self.unsubscribe(channel, queue)
-
     async def run_script(self, script: Script, keys: list[str], args: list[Any]) -> Any:
         async with self._lock:
             return script.fallback(self, keys, [str(a) for a in args])
@@ -345,7 +304,6 @@ class InMemoryRedis:
         self._z.clear()
         self._h.clear()
         self._kv.clear()
-        self._channels.clear()
 
 
 _backend: RedisBackend | None = None

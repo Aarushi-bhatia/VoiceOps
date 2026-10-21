@@ -12,83 +12,100 @@
 :root {
   color-scheme: light;
 
-  --surface-1: #fcfcfb;
-  --surface-page: #f9f9f7;
-  --surface-sunken: #f2f1ed;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #898781;
-  --gridline: #e1e0d9;
-  --baseline: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
+  /* Neutrals carry a slight cool-green bias toward the signal accent. */
+  --surface-1: #ffffff;
+  --surface-page: #f4f6f5;
+  --surface-sunken: #eef1ef;
+  --text-primary: #0d1412;
+  --text-secondary: #4a5552;
+  --text-muted: #6f7a76;
+  --gridline: #e3e8e5;
+  --baseline: #c4ccc8;
+  --border: rgba(13, 20, 18, 0.09);
 
-  /* Ordinal blue ramp: on the light surface, start no lighter than step 250. */
-  --ordinal-1: #86b6ef;
-  --ordinal-2: #5598e7;
-  --ordinal-3: #2a78d6;
-  --ordinal-4: #1c5cab;
+  /* Series 1 doubles as the accent: buttons, links, active navigation. */
+  --series-1: #0e7c69;
+  --series-2: #e0603a;
+  --series-3: #4f5fd6;
+  --series-4: #d99700;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(14, 124, 105, 0.1);
+
+  /* Ordinal teal ramp: on the light surface, start no lighter than step 250. */
+  --ordinal-1: #8fdccb;
+  --ordinal-2: #4fbfa6;
+  --ordinal-3: #0e7c69;
+  --ordinal-4: #0a5a4c;
 
   --status-good: #0ca30c;
-  --status-warning: #fab219;
+  --status-warning: #d99700;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
-  --status-neutral: #898781;
+  --status-neutral: #6f7a76;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --surface-1: #1a1a19;
-    --surface-page: #0d0d0d;
-    --surface-sunken: #131312;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --gridline: #2c2c2a;
-    --baseline: #383835;
-    --border: rgba(255, 255, 255, 0.1);
+    --surface-1: #121715;
+    --surface-page: #0a0d0c;
+    --surface-sunken: #0e1211;
+    --text-primary: #ecf1ef;
+    --text-secondary: #b3beb9;
+    --text-muted: #7f8b86;
+    --gridline: #212926;
+    --baseline: #313b37;
+    --border: rgba(214, 240, 230, 0.09);
 
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
+    --series-1: #3fc7ab;
+    --series-2: #e8714a;
+    --series-3: #8b98f5;
+    --series-4: #e0a92e;
+    --on-accent: #03201a;
+    --accent-soft: rgba(63, 199, 171, 0.12);
 
     /* On the dark surface, go no darker than step 600. */
-    --ordinal-1: #184f95;
-    --ordinal-2: #256abf;
-    --ordinal-3: #3987e5;
-    --ordinal-4: #86b6ef;
+    --ordinal-1: #155e52;
+    --ordinal-2: #1f8a75;
+    --ordinal-3: #3fc7ab;
+    --ordinal-4: #8fe3d1;
+
+    --status-warning: #f0b429;
+    --status-neutral: #7f8b86;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --surface-1: #1a1a19;
-  --surface-page: #0d0d0d;
-  --surface-sunken: #131312;
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #898781;
-  --gridline: #2c2c2a;
-  --baseline: #383835;
-  --border: rgba(255, 255, 255, 0.1);
+  --surface-1: #121715;
+  --surface-page: #0a0d0c;
+  --surface-sunken: #0e1211;
+  --text-primary: #ecf1ef;
+  --text-secondary: #b3beb9;
+  --text-muted: #7f8b86;
+  --gridline: #212926;
+  --baseline: #313b37;
+  --border: rgba(214, 240, 230, 0.09);
 
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
+  --series-1: #3fc7ab;
+  --series-2: #e8714a;
+  --series-3: #8b98f5;
+  --series-4: #e0a92e;
+  --on-accent: #03201a;
+  --accent-soft: rgba(63, 199, 171, 0.12);
 
-  --ordinal-1: #184f95;
-  --ordinal-2: #256abf;
-  --ordinal-3: #3987e5;
-  --ordinal-4: #86b6ef;
+  --ordinal-1: #155e52;
+  --ordinal-2: #1f8a75;
+  --ordinal-3: #3fc7ab;
+  --ordinal-4: #8fe3d1;
+
+  --status-warning: #f0b429;
+  --status-neutral: #7f8b86;
 }
 
 html,
@@ -101,7 +118,7 @@ body {
   margin: 0;
   background: var(--surface-page);
   color: var(--text-primary);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -110,10 +127,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Phone numbers, ids and live counts: the operator's raw material. */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .card {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .focus-ring:focus-visible {

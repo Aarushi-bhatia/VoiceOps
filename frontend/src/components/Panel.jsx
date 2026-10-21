@@ -1,6 +1,6 @@
 export default function Panel({ title, description, actions, children, className = '' }) {
   return (
-    <section className={`card flex flex-col ${className}`}>
+    <section className={`card flex min-w-0 flex-col ${className}`}>
       {(title || actions) && (
         <header className="flex items-start justify-between gap-3 border-b px-4 py-3" style={{ borderColor: 'var(--border)' }}>
           <div>
