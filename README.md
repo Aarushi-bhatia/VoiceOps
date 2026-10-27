@@ -110,5 +110,3 @@ cd backend && .venv/bin/alembic upgrade head          # migrations
 cd backend && .venv/bin/python scripts/loadtest.py    # throughput
 cd backend && .venv/bin/python scripts/retention.py --dry-run
 ```
-
-Measured at **26 calls/sec with 48 workers** on one machine (10,000 calls, no failures, per-turn latency flat versus a 200-call run). The real ceiling is the carrier: roughly one call per second per number.
