@@ -67,9 +67,29 @@ Graphs are validated on save: dangling edges, unreachable steps and graphs with 
 | LLM | keyword matching | Google Gemini, Anthropic |
 | STT | replays the mock audio's text | Deepgram |
 | TTS | silent PCM sized to a speaking rate | ElevenLabs |
-| Telephony | scripted customer | Twilio (REST + Media Streams) |
+| Telephony | scripted customer | Telnyx, Twilio — or your own, see below |
 
 Switch one at a time — `LLM_PROVIDER=gemini` with the rest mocked is a normal setup, and the one this has been run on most. The LLM adapters absorb the provider's own rate limits and overloads with backoff rather than abandoning a call mid-conversation.
+
+### Telephony
+
+`TELEPHONY_PROVIDER` selects the carrier, and each carrier reads its own prefixed variables (`TELNYX_*`, `TWILIO_*`), so switching is one setting plus that carrier's block in `.env.example`. Carriers register themselves in `backend/app/voice/telephony/`; the worker, queue and config don't know which one is in use.
+
+Adding one is a single module. A carrier that dials over REST and streams audio over a websocket subclasses `MediaStreamProvider` and `MediaStreamSession` in `stream.py`, which own the dial/answer/no-answer flow and turn-taking, and supplies only its endpoints and message shapes — `telnyx.py` is about 130 lines. Anything else implements the `TelephonyProvider` protocol directly. Either way it calls `@register("name")`; a module outside the package is picked up through `TELEPHONY_PLUGINS=my_pkg.my_carrier`.
+
+**Trying it without spending money**, cheapest first:
+
+1. **Mock (default).** `$0`, no account, no phone. Exercises the queue, retries and conversation end to end.
+2. **A trial account dialling your own phone.** Telnyx's trial documents a small testing credit, outbound calls to its one verified number only, and a 10-minute cap per call; Twilio's trial is similar. Confirm the current credit in the carrier's dashboard.
+3. **A paid account, fenced in.** Set the spend guard, which applies to every real carrier:
+
+```bash
+TELEPHONY_PROVIDER=telnyx
+TELEPHONY_ALLOWED_NUMBERS=+15551230000   # anything else is refused, and not retried
+TELEPHONY_MAX_CALL_SECONDS=120           # the carrier cuts the call off
+```
+
+Keep `STT_PROVIDER`, `TTS_PROVIDER` and `LLM_PROVIDER` on `mock` (or `gemini`) while you check the line works; telephony is then the only thing billing. The Telnyx adapter is tested against a fake carrier but has not been run against a live account.
 
 Reserved mock numbers make each queue path reproducible: `…1111` always answers, `…9999` never does, `…8888` is busy until the third attempt, `…0000` is invalid, `…7777` drops mid-call.
 

@@ -19,7 +19,8 @@ from app.voice.base import (
 )
 from app.voice.llm.mock import MockLanguageModel
 from app.voice.stt.mock import MockSpeechToText
-from app.voice.telephony.mock import MockTelephonyProvider
+from app.voice.telephony import providers as telephony_providers
+from app.voice.telephony.guard import GuardedTelephony
 from app.voice.tts.mock import MockTextToSpeech
 
 logger = logging.getLogger(__name__)
@@ -65,20 +66,14 @@ def build_llm(settings: Settings) -> LanguageModel:
 
 
 def build_telephony(settings: Settings) -> TelephonyProvider:
+    provider = telephony_providers.build(settings)
     if settings.telephony_provider == "mock":
-        return MockTelephonyProvider(
-            seed=settings.mock_seed, latency_scale=settings.mock_latency_scale
-        )
-    if settings.telephony_provider == "twilio":
-        from app.voice.telephony.twilio import TwilioTelephonyProvider
-
-        return TwilioTelephonyProvider(
-            account_sid=settings.twilio_account_sid or "",
-            auth_token=settings.twilio_auth_token or "",
-            from_number=settings.twilio_from_number or "",
-            public_base_url=settings.twilio_public_base_url or "",
-        )
-    raise ValueError(f"unknown TELEPHONY_PROVIDER: {settings.telephony_provider}")
+        return provider
+    return GuardedTelephony(
+        provider,
+        allowed_numbers=settings.telephony_allowed_number_set,
+        max_call_seconds=settings.telephony_max_call_seconds,
+    )
 
 
 _stack: VoiceStack | None = None
