@@ -110,3 +110,5 @@ cd backend && .venv/bin/alembic upgrade head          # migrations
 cd backend && .venv/bin/python scripts/loadtest.py    # throughput
 cd backend && .venv/bin/python scripts/retention.py --dry-run
 ```
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat: ...`, `fix: ...`, `chore: ...`). Run `bun install` once at the repo root to enable the `commit-msg` hook that checks them; CI checks them on pull requests too. Python is linted and formatted with `ruff check` and `ruff format` in `backend/`.

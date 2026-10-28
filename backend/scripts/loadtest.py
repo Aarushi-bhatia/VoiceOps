@@ -21,17 +21,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import func, select  # noqa: E402
+from sqlalchemy import func, select
 
-from app.core.config import get_settings  # noqa: E402
-from app.core.enums import CallPriority, CallStatus  # noqa: E402
-from app.core.logging import configure_logging  # noqa: E402
-from app.db.base import Base  # noqa: E402
-from app.db.models import Agent, Call, CallTurn  # noqa: E402
-from app.db.session import get_engine, init_models, session_scope  # noqa: E402
-from app.seed_data import DEMO_AGENTS  # noqa: E402
-from app.services.calls import CallService  # noqa: E402
-from app.worker.call_worker import CallWorker  # noqa: E402
+from app.core.config import get_settings
+from app.core.enums import CallPriority, CallStatus
+from app.core.logging import configure_logging
+from app.db.base import Base
+from app.db.models import Agent, Call, CallTurn
+from app.db.session import get_engine, init_models, session_scope
+from app.seed_data import DEMO_AGENTS
+from app.services.calls import CallService
+from app.worker.call_worker import CallWorker
 
 # Always answers, so throughput is measured on calls that actually converse
 # rather than on dial failures.

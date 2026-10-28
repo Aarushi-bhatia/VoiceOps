@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime  # noqa: TC003 - used in annotations
+from datetime import datetime
 
 from app.queue.redis_client import RedisBackend, Script, now_ms
 
@@ -146,7 +146,7 @@ def next_calling_window(
 
     try:
         local = now.astimezone(ZoneInfo(timezone_name))
-    except Exception:  # noqa: BLE001 - an unknown zone must not block calling
+    except Exception:
         logger.warning("unknown calling-hours timezone", extra={"timezone": timezone_name})
         return None
 

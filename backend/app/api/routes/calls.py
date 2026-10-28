@@ -68,7 +68,7 @@ async def create_calls_bulk(payload: BulkCallCreate, service: Calls) -> list[Cal
     created: list[Call] = []
     try:
         for recipient in payload.recipients:
-            created.append(
+            created.append(  # noqa: PERF401 - len(created) reports partial progress below
                 await service.create_call(
                     agent_id=payload.agent_id,
                     to_number=recipient.to_number,
