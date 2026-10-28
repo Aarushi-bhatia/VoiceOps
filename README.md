@@ -21,7 +21,7 @@ cd backend && python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend && bun install && bun run dev
 ```
 
 With no `REDIS_URL`, the API embeds a worker, since nothing else would consume the queue.
