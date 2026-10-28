@@ -150,6 +150,8 @@ class MediaStreamSession:
                     await self._marks.put(event["mark"]["name"])
                 elif kind == "stop":
                     break
+                else:
+                    logger.info("unhandled media stream event: %s", str(event)[:300])
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -174,11 +176,14 @@ class MediaStreamSession:
             await self._ws.send_text(json.dumps(self._media_message(payload)))
         mark = uuid.uuid4().hex[:8]
         await self._ws.send_text(json.dumps(self._mark_message(mark)))
+        sent_at = time.monotonic()
+        logger.info("sent %d bytes (%.1fs of audio)", len(padded), audio.duration_ms / 1000)
         # The carrier echoes the mark once the audio has actually been played out.
-        deadline = time.monotonic() + (audio.duration_ms / 1000) + 5
+        deadline = sent_at + (audio.duration_ms / 1000) + 5
         while time.monotonic() < deadline:
             try:
                 if await asyncio.wait_for(self._marks.get(), timeout=1.0) == mark:
+                    logger.info("mark echoed after %.1fs", time.monotonic() - sent_at)
                     return
             except TimeoutError:
                 if not self._open:
@@ -218,6 +223,7 @@ class MediaStreamSession:
                 provider=self.provider_name,
             )
         payload = bytes(collected)
+        logger.info("heard %.1fs of caller audio", len(payload) / FRAME_BYTES * FRAME_MS / 1000)
         return AudioChunk(
             data=payload,
             duration_ms=(len(payload) / FRAME_BYTES) * FRAME_MS,
@@ -246,11 +252,15 @@ class MediaStreamSession:
         # Let the websocket route return now that nothing is using the socket.
         self._provider.registry.finish(self.call_id)
 
-    async def _await_stream_start(self, timeout: float = 5.0) -> None:
+    async def wait_for_start(self, timeout: float) -> bool:
+        """Wait for the carrier's start event; false if the call ends or times out first."""
         deadline = time.monotonic() + timeout
-        while not self._stream_started and time.monotonic() < deadline:
+        while not self._stream_started and self._open and time.monotonic() < deadline:
             await asyncio.sleep(0.02)
-        if not self._stream_started:
+        return self._stream_started
+
+    async def _await_stream_start(self, timeout: float = 5.0) -> None:
+        if not await self.wait_for_start(timeout):
             raise TelephonyError(
                 "media stream never sent a start event",
                 category=FailureCategory.PROVIDER_ERROR,
@@ -347,7 +357,15 @@ class MediaStreamProvider:
                 "call was not answered", category=FailureCategory.NO_ANSWER, provider=self.name
             ) from exc
 
-        return self.session_class(request.call_id, external_id, websocket, provider=self)
+        session = self.session_class(request.call_id, external_id, websocket, provider=self)
+        # Some carriers (Telnyx) open the socket as the call starts ringing, so
+        # the socket attaching is not the answer; the stream's start event is.
+        if not await session.wait_for_start(request.timeout_seconds):
+            await session.hangup()
+            raise TelephonyError(
+                "call was not answered", category=FailureCategory.NO_ANSWER, provider=self.name
+            )
+        return session
 
     async def aclose(self) -> None:
         await self._client.aclose()

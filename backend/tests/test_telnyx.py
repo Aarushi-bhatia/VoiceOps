@@ -199,6 +199,49 @@ async def test_an_unanswered_call_is_hung_up_and_retried_as_no_answer():
     assert stream_registry.attach("call-2", FakeTelnyxSocket()) is None
 
 
+async def test_the_call_is_not_answered_until_the_stream_starts():
+    # Telnyx opens the socket while the phone is still ringing and sends the
+    # start event only on answer; the socket attaching must not count as one.
+    api, stream_registry, socket = FakeTelnyxApi(), MediaStreamRegistry(), FakeTelnyxSocket()
+    provider = make_provider(api, stream_registry)
+
+    dialling = asyncio.create_task(
+        provider.dial(DialRequest(call_id="call-1", to_number="+15550100199"))
+    )
+    while "call-1" not in stream_registry._waiters:
+        await asyncio.sleep(0)
+    stream_registry.attach("call-1", socket)
+    await socket.push({"event": "connected", "version": "1.0.0"})
+
+    await asyncio.sleep(0.1)
+    assert not dialling.done()
+
+    await socket.push({"event": "start", "stream_id": "s-1", "start": {}})
+    session = await asyncio.wait_for(dialling, timeout=2)
+    assert session.is_open
+    await session.hangup()
+
+
+async def test_a_ringing_call_that_never_starts_is_no_answer():
+    api, stream_registry, socket = FakeTelnyxApi(), MediaStreamRegistry(), FakeTelnyxSocket()
+    provider = make_provider(api, stream_registry)
+
+    dialling = asyncio.create_task(
+        provider.dial(DialRequest(call_id="call-3", to_number="+15550100199", timeout_seconds=0.2))
+    )
+    while "call-3" not in stream_registry._waiters:
+        await asyncio.sleep(0)
+    stream_registry.attach("call-3", socket)
+    await socket.push({"event": "connected", "version": "1.0.0"})
+
+    with pytest.raises(TelephonyError) as exc:
+        await asyncio.wait_for(dialling, timeout=2)
+
+    assert exc.value.category is FailureCategory.NO_ANSWER
+    assert api.calls[-1][0] == "/v2/calls/cc-1/actions/hangup"
+    assert socket.closed
+
+
 @pytest.mark.parametrize(
     ("status", "body", "category"),
     [
