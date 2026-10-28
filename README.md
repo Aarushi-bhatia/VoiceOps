@@ -89,7 +89,7 @@ TELEPHONY_ALLOWED_NUMBERS=+15551230000   # anything else is refused, and not ret
 TELEPHONY_MAX_CALL_SECONDS=120           # the carrier cuts the call off
 ```
 
-Keep `STT_PROVIDER`, `TTS_PROVIDER` and `LLM_PROVIDER` on `mock` (or `gemini`) while you check the line works; telephony is then the only thing billing. The Telnyx adapter is tested against a fake carrier but has not been run against a live account.
+Keep `STT_PROVIDER`, `TTS_PROVIDER` and `LLM_PROVIDER` on `mock` (or `gemini`) while you check the line works; telephony is then the only thing billing. The Telnyx adapter is tested against a fake carrier and has been run end to end on a live account. Live calls need the API and worker in one process (leave `REDIS_URL` unset) until audio can cross containers; see [docs/telnyx-live-calling.md](docs/telnyx-live-calling.md) for what the live run turned up and what to improve.
 
 Reserved mock numbers make each queue path reproducible: `…1111` always answers, `…9999` never does, `…8888` is busy until the third attempt, `…0000` is invalid, `…7777` drops mid-call.
 
