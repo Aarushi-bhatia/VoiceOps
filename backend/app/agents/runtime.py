@@ -17,6 +17,7 @@ Failure split, which matters for retries:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -197,7 +198,7 @@ class ConversationRuntime:
             if not utterance:
                 continue
 
-            value, confidence, llm = await self.nlu.extract(
+            value, _confidence, llm = await self.nlu.extract(
                 utterance,
                 field=node.field,
                 field_type=node.field_type,
@@ -300,16 +301,14 @@ class ConversationRuntime:
     async def _say_safely(
         self, session: CallSession, state: _RunState, text: str, node_id: str
     ) -> None:
-        try:
+        with contextlib.suppress(TelephonyError):
             await self._speak(session, state, text, node_id)
-        except TelephonyError:
-            pass
 
     async def _hangup_safely(self, session: CallSession) -> None:
         try:
             if session.is_open:
                 await session.hangup()
-        except Exception as exc:  # noqa: BLE001 - hangup is best effort
+        except Exception as exc:
             logger.debug("hangup failed", extra={"error": str(exc)})
 
 

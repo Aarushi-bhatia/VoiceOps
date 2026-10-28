@@ -19,16 +19,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import select
 
-from app.core.config import get_settings  # noqa: E402
-from app.core.enums import CallPriority  # noqa: E402
-from app.core.logging import configure_logging  # noqa: E402
-from app.db.base import Base  # noqa: E402
-from app.db.models import Agent  # noqa: E402
-from app.db.session import get_engine, init_models, session_scope  # noqa: E402
-from app.seed_data import DEMO_AGENTS, DEMO_NUMBERS  # noqa: E402
-from app.services.calls import CallService  # noqa: E402
+from app.core.config import get_settings
+from app.core.enums import CallPriority
+from app.core.logging import configure_logging
+from app.db.base import Base
+from app.db.models import Agent
+from app.db.session import get_engine, init_models, session_scope
+from app.seed_data import DEMO_AGENTS, DEMO_NUMBERS
+from app.services.calls import CallService
 
 PRIORITIES = [
     CallPriority.URGENT,

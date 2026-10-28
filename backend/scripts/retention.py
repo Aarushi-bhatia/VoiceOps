@@ -22,13 +22,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import delete, func, select  # noqa: E402
+from sqlalchemy import delete, func, select
 
-from app.core.config import get_settings  # noqa: E402
-from app.core.enums import CallStatus  # noqa: E402
-from app.core.logging import configure_logging  # noqa: E402
-from app.db.models import Call, CallEvent, CallTurn  # noqa: E402
-from app.db.session import session_scope  # noqa: E402
+from app.core.config import get_settings
+from app.core.enums import CallStatus
+from app.core.logging import configure_logging
+from app.db.models import Call, CallEvent, CallTurn
+from app.db.session import session_scope
 
 TERMINAL = (CallStatus.COMPLETED, CallStatus.FAILED, CallStatus.CANCELED)
 

@@ -18,7 +18,7 @@ from app.voice.telephony.twilio import MediaStreamRegistry
 
 def test_ulaw_silence_and_speech_are_distinguished():
     silence = b"\xff" * FRAME_BYTES
-    speech = bytes(range(0, 160))
+    speech = bytes(range(160))
     assert is_silence(silence)
     assert not is_silence(speech)
     assert average_amplitude(silence) < average_amplitude(speech)

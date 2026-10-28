@@ -119,7 +119,6 @@ async def clean_database(settings: Settings):
     await init_models()
     if os.getenv("VOICEOPS_TEST_DATABASE_URL"):
         await _truncate_all()
-    yield
 
 
 @pytest.fixture
@@ -162,11 +161,11 @@ async def client(
     app = create_app(settings)
     # Tests drive the worker explicitly so assertions are deterministic.
     app.state.embedded_worker = False
-    async with app.router.lifespan_context(app):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as http_client:
-            yield http_client
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client,
+    ):
+        yield http_client
 
 
 @pytest.fixture

@@ -64,7 +64,7 @@ class AnthropicLanguageModel:
         messages: Sequence[LLMMessage],
         *,
         model: str | None = None,
-        temperature: float = 0.3,  # noqa: ARG002 - rejected by current models
+        temperature: float = 0.3,
         max_tokens: int = 512,
         json_schema: dict[str, Any] | None = None,
     ) -> LLMResult:
