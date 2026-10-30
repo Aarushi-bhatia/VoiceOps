@@ -67,7 +67,8 @@ def test_a_plugin_module_adds_a_carrier_without_touching_core(tmp_path, monkeypa
 
 
 def test_real_provider_without_credentials_fails_at_startup(monkeypatch):
-    monkeypatch.delenv("TELNYX_API_KEY", raising=False)
+    # Empty rather than deleted: a deleted variable falls back to a local .env.
+    monkeypatch.setenv("TELNYX_API_KEY", "")
     with pytest.raises(ValueError, match="TELNYX_API_KEY"):
         build_telephony(Settings(telephony_provider="telnyx"))
 
