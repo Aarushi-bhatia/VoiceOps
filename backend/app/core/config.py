@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-
-ProviderName = Literal["mock", "deepgram", "anthropic", "elevenlabs", "twilio"]
 
 
 class Settings(BaseSettings):
@@ -112,11 +110,18 @@ class Settings(BaseSettings):
     # rather than letting them abandon a call mid-conversation.
     gemini_max_attempts: int = 4
     elevenlabs_api_key: str | None = None
-    twilio_account_sid: str | None = None
-    twilio_auth_token: str | None = None
-    twilio_from_number: str | None = None
-    # Public origin Twilio can reach for Media Streams (a tunnel in dev).
-    twilio_public_base_url: str | None = None
+
+    # ---- Telephony ----
+    # Which provider to dial with. Providers register themselves (see
+    # app.voice.telephony.providers) and read their own prefixed settings, e.g.
+    # TWILIO_* or TELNYX_*, so none of their credentials are declared here.
+    # Extra provider modules to import at startup, comma-separated.
+    telephony_plugins: str = ""
+    # Spend guard for any real provider. Numbers outside this comma-separated
+    # allowlist are refused, and calls are cut off after the time limit. Set both
+    # on a trial or demo account; empty / 0 disables each.
+    telephony_allowed_numbers: str = ""
+    telephony_max_call_seconds: int = 0
 
     # Deterministic seed for the mock voice stack, so simulations and tests
     # replay identically.
@@ -139,6 +144,14 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 pass
         return [origin.strip() for origin in text.split(",") if origin.strip()]
+
+    @property
+    def telephony_plugin_list(self) -> list[str]:
+        return [name.strip() for name in self.telephony_plugins.split(",") if name.strip()]
+
+    @property
+    def telephony_allowed_number_set(self) -> frozenset[str]:
+        return frozenset(n.strip() for n in self.telephony_allowed_numbers.split(",") if n.strip())
 
     @property
     def is_sqlite(self) -> bool:

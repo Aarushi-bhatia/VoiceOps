@@ -23,8 +23,10 @@ import random
 import uuid
 import zlib
 
+from app.core.config import Settings
 from app.core.enums import FailureCategory
 from app.voice.base import AudioChunk, DialRequest, TelephonyError
+from app.voice.telephony.providers import register
 from app.voice.tts.mock import speech_duration_ms
 
 _AFFIRM = ["Yes, that's right.", "Yep, correct.", "That's the one."]
@@ -249,3 +251,8 @@ class MockTelephonyProvider:
             latency_scale=self.latency_scale,
             drops_after_turn=3 if number.endswith("7777") else None,
         )
+
+
+@register("mock")
+def build_mock(settings: Settings) -> MockTelephonyProvider:
+    return MockTelephonyProvider(seed=settings.mock_seed, latency_scale=settings.mock_latency_scale)

@@ -97,6 +97,8 @@ class DialRequest:
     to_number: str
     from_number: str | None = None
     timeout_seconds: float = 30.0
+    # Hard cap on call length, enforced by the carrier. ``None`` leaves it to them.
+    max_duration_seconds: int | None = None
     # Which delivery attempt this is (0-based). Providers may use it, and the
     # mock stack uses it to model numbers that only answer on a later try.
     attempt: int = 0

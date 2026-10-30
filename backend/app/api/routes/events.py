@@ -66,10 +66,13 @@ def restore_shutdown_signal_handlers() -> None:
     _previous_handlers.clear()
 
 
+# "/ws/twilio/..." predates the carrier-neutral path and stays so calls already
+# configured against it keep working.
+@router.websocket("/ws/media/{call_id}")
 @router.websocket("/ws/twilio/{call_id}")
-async def twilio_media_stream(websocket: WebSocket, call_id: str) -> None:
-    """Attach an inbound Twilio Media Stream to the call that is waiting for it."""
-    from app.voice.telephony.twilio import registry
+async def media_stream(websocket: WebSocket, call_id: str) -> None:
+    """Attach a carrier's inbound media stream to the call that is waiting for it."""
+    from app.voice.telephony.stream import registry
 
     await websocket.accept()
     finished = registry.attach(call_id, websocket)
@@ -78,11 +81,11 @@ async def twilio_media_stream(websocket: WebSocket, call_id: str) -> None:
         await websocket.close(code=1011, reason="no call is waiting for this stream")
         return
 
-    # TwilioCallSession owns the socket from here; returning would make Starlette
+    # The call session owns the socket from here; returning would make Starlette
     # tear the connection down mid-call, so hold the route open until the session
     # signals that it has finished with it - or until the app shuts down.
-    stopping = asyncio.create_task(_shutting_down.wait(), name="twilio-shutdown-watch")
-    waiter = asyncio.create_task(finished.wait(), name="twilio-finished")
+    stopping = asyncio.create_task(_shutting_down.wait(), name="media-shutdown-watch")
+    waiter = asyncio.create_task(finished.wait(), name="media-finished")
     try:
         await asyncio.wait({waiter, stopping}, return_when=asyncio.FIRST_COMPLETED)
     finally:
