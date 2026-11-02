@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -104,7 +104,9 @@ class CallService:
             idempotency_key=idempotency_key,
         )
         self.session.add(call)
-        await self.session.flush()
+        # Commit before queueing: with an embedded worker the job can be picked up
+        # at once, and a row that is only flushed is invisible to its session.
+        await self.session.commit()
 
         await self.queue.enqueue(self._job_for(call))
         await self.record_event(
@@ -157,6 +159,7 @@ class CallService:
 
         # The call may still be sitting in the dead-letter queue.
         await self.queue.purge_dead_letter(str(call.id))
+        await self.session.commit()
         await self.queue.enqueue(self._job_for(call))
         await self.record_event(call, EventType.ENQUEUED, {"manual_retry": True})
         return call
@@ -185,6 +188,9 @@ class CallService:
         call.duration_seconds = result.duration_seconds
         call.cost_cents = estimate_cost_cents(result, self.queue.settings)
 
+        # A call that is run again (a manual retry) replaces its transcript; the
+        # (call, index) pair is unique, so appending would fail the whole save.
+        await self.session.execute(delete(CallTurn).where(CallTurn.call_id == call.id))
         for turn in result.turns:
             self.session.add(
                 CallTurn(
