@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     # Outbound calling window in the callee's local time, 24h clock. Also off by
     # default, and for a sharper reason: a global default window is wrong for
     # most callees, and one that is wrong silently defers every call. Set it per
-    # deployment (compose and the Kubernetes config both do). Per-call overrides
+    # deployment (compose does). Per-call overrides
     # come from a "timezone" key in the call's metadata. start == end disables.
     calling_hours_start: int = 0
     calling_hours_end: int = 0

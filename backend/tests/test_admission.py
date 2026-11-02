@@ -234,7 +234,7 @@ async def test_default_settings_do_not_block_calls(db, agent):
     call outside it - which broke seeding and the dashboard demo at any hour
     outside the hardcoded window. Carrier rate and calling hours are policy that
     depends on the deployment, so both default to off and are set explicitly in
-    compose and the Kubernetes config.
+    compose.
     """
     from app.core.config import Settings
 
