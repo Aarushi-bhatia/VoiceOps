@@ -64,6 +64,51 @@ async def test_worker_runs_a_call_and_records_the_transcript(db, agent, queue):
     assert stats.counters["completed"] == 1
 
 
+async def test_a_call_is_committed_before_it_is_queued(db, agent, queue, monkeypatch):
+    # An embedded worker can claim a job the moment it is queued; if the row were
+    # only flushed it would be invisible to the worker's own session.
+    sessions: list = []
+    pending: list[bool] = []
+    real_enqueue = queue.enqueue
+
+    async def spy(job):
+        pending.append(sessions[-1].in_transaction())
+        return await real_enqueue(job)
+
+    monkeypatch.setattr(queue, "enqueue", spy)
+    sessions.append(db)
+    call = await CallService(db).create_call(agent_id=agent.id, to_number="+15551111")
+    await db.commit()
+    await drain(CallWorker())
+
+    async with session_scope() as session:
+        sessions.append(session)
+        await CallService(session).retry_call(call.id)
+
+    assert pending == [False, False]
+
+
+async def test_running_a_finished_call_again_replaces_its_transcript(db, agent):
+    call = await enqueue(db, agent, "+15551111")
+    worker = CallWorker()
+    await drain(worker)
+
+    async with session_scope() as session:
+        service = CallService(session)
+        await service.retry_call(call.id)
+    await drain(worker)
+
+    stored = await reload(call.id)
+    assert stored.status is CallStatus.COMPLETED
+    async with session_scope() as session:
+        indexes = (
+            await session.scalars(
+                select(CallTurn.index).where(CallTurn.call_id == call.id).order_by(CallTurn.index)
+            )
+        ).all()
+    assert indexes == list(range(len(indexes))) and len(indexes) >= 2
+
+
 async def test_transient_failure_schedules_a_retry(db, agent, queue):
     # +...9999 never answers, which is a transient failure.
     call = await enqueue(db, agent, "+15559999")

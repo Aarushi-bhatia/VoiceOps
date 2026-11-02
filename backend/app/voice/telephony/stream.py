@@ -139,6 +139,7 @@ class MediaStreamSession:
                 event = json.loads(await self._ws.receive_text())
                 kind = event.get("event")
                 if kind == "start":
+                    logger.info("media stream started: %s", str(event)[:400])
                     self._stream_sid = self._stream_id(event)
                     self._stream_started = True
                 elif kind == "media":
@@ -163,6 +164,16 @@ class MediaStreamSession:
             self._open = False
             self._provider.registry.finish(self.call_id)
 
+    def _discard_inbound(self) -> None:
+        """Drop caller audio captured while the agent was talking.
+
+        Agents do not take interruptions, and left in the queue it would be read
+        as the answer to the next question: an instant, truncated turn that never
+        waits for the caller.
+        """
+        while not self._inbound.empty():
+            self._inbound.get_nowait()
+
     async def play(self, audio: AudioChunk) -> None:
         self._require_open()
         if not audio.data:
@@ -184,6 +195,7 @@ class MediaStreamSession:
             try:
                 if await asyncio.wait_for(self._marks.get(), timeout=1.0) == mark:
                     logger.info("mark echoed after %.1fs", time.monotonic() - sent_at)
+                    self._discard_inbound()
                     return
             except TimeoutError:
                 if not self._open:
@@ -197,6 +209,7 @@ class MediaStreamSession:
         self._require_open()
         collected = bytearray()
         silent_ms = 0.0
+        frames = quiet = 0
         deadline = time.monotonic() + timeout_seconds
 
         while time.monotonic() < deadline:
@@ -205,7 +218,9 @@ class MediaStreamSession:
                 frame = await asyncio.wait_for(self._inbound.get(), timeout=remaining)
             except TimeoutError:
                 break
+            frames += 1
             if is_silence(frame):
+                quiet += 1
                 # Only count trailing silence once the caller has started.
                 if collected:
                     silent_ms += (len(frame) / FRAME_BYTES) * FRAME_MS
@@ -223,7 +238,12 @@ class MediaStreamSession:
                 provider=self.provider_name,
             )
         payload = bytes(collected)
-        logger.info("heard %.1fs of caller audio", len(payload) / FRAME_BYTES * FRAME_MS / 1000)
+        logger.info(
+            "heard %.1fs of caller audio (%d frames received, %d silent)",
+            len(payload) / FRAME_BYTES * FRAME_MS / 1000,
+            frames,
+            quiet,
+        )
         return AudioChunk(
             data=payload,
             duration_ms=(len(payload) / FRAME_BYTES) * FRAME_MS,
@@ -233,7 +253,21 @@ class MediaStreamSession:
 
     async def transfer(self, destination: str) -> None:
         self._require_open()
-        await self._provider.transfer_call(self.external_id, destination)
+        provider = self._provider
+        try:
+            await provider.transfer_call(self.external_id, destination)
+        except httpx.HTTPStatusError as exc:
+            raise TelephonyError(
+                f"{provider.name} refused the transfer: {exc.response.text[:200]}",
+                category=provider._classify_error(exc.response.status_code, exc.response.text),
+                provider=provider.name,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise TelephonyError(
+                f"{provider.name} transfer failed: {exc}",
+                category=FailureCategory.NETWORK,
+                provider=provider.name,
+            ) from exc
         await self._teardown()
 
     async def hangup(self, reason: str = "completed") -> None:

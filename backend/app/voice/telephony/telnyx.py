@@ -41,6 +41,8 @@ class TelnyxSettings(ProviderSettings):
     connection_id: str = ""
     from_number: str = ""
     public_base_url: str = ""
+    # Record both sides of each call, to hear what actually reached the phone.
+    record: bool = False
 
 
 class TelnyxCallSession(MediaStreamSession):
@@ -70,6 +72,7 @@ class TelnyxTelephonyProvider(MediaStreamProvider):
         from_number: str,
         public_base_url: str,
         *,
+        record: bool = False,
         client: httpx.AsyncClient | None = None,
         stream_registry: MediaStreamRegistry | None = None,
     ) -> None:
@@ -92,6 +95,7 @@ class TelnyxTelephonyProvider(MediaStreamProvider):
         )
         self.connection_id = connection_id
         self.from_number = from_number
+        self.record = record
 
     async def _place_call(self, request: DialRequest, stream_url: str) -> str:
         body: dict[str, Any] = {
@@ -101,9 +105,17 @@ class TelnyxTelephonyProvider(MediaStreamProvider):
             "timeout_secs": int(request.timeout_seconds),
             "stream_url": stream_url,
             "stream_track": "inbound_track",
+            # Without this the stream uses the call's own codec, which is PCMA on Indian
+            # routes, while everything here sends and decodes mu-law.
+            "stream_codec": "PCMU",
             "stream_bidirectional_mode": "rtp",
             "stream_bidirectional_codec": "PCMU",
+            # Telnyx defaults to "opposite", the other bridged leg. A dialled call has
+            # none, so the agent's audio is accepted and played to nobody.
+            "stream_bidirectional_target_legs": "self",
         }
+        if self.record:
+            body.update(record="record-from-answer", record_channels="dual", record_format="mp3")
         if request.max_duration_seconds:
             body["time_limit_secs"] = request.max_duration_seconds
         response = await self._client.post("/calls", json=body)

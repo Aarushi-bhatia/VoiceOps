@@ -206,6 +206,13 @@ class CallWorker:
             # dropped line is not redialled either.
             await self._handle_failure(job, category=exc.category, reason=str(exc), answered=True)
             return
+        except Exception as exc:
+            # Same reasoning for a bug we did not anticipate: they are on the line.
+            logger.exception("unexpected failure during a call", extra={"call_id": job.call_id})
+            await self._handle_failure(
+                job, category=FailureCategory.UNKNOWN, reason=str(exc), answered=True
+            )
+            return
 
         async with session_scope() as session:
             service = CallService(session, self.queue)
