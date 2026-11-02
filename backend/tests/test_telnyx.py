@@ -108,9 +108,27 @@ async def test_dial_places_a_bidirectional_pcmu_call_and_returns_the_session():
     assert body["stream_url"] == "wss://voiceops.example.com/ws/media/call-1"
     assert body["stream_bidirectional_mode"] == "rtp"
     assert body["stream_bidirectional_codec"] == "PCMU"
+    # The streamed audio must be mu-law whatever codec the call itself negotiated.
+    assert body["stream_codec"] == "PCMU"
+    # A dialled call has no opposite leg, so the audio must go back to the callee.
+    assert body["stream_bidirectional_target_legs"] == "self"
     assert body["time_limit_secs"] == 120
     assert session.external_id == "cc-1"
     await session.hangup()
+
+
+async def test_recording_is_requested_only_when_enabled():
+    for record in (False, True):
+        api, stream_registry, socket = FakeTelnyxApi(), MediaStreamRegistry(), FakeTelnyxSocket()
+        provider = make_provider(api, stream_registry)
+        provider.record = record
+        session = await answered_session(provider, stream_registry, socket)
+        body = api.calls[0][1]
+        assert ("record" in body) is record
+        if record:
+            assert body["record"] == "record-from-answer"
+            assert body["record_channels"] == "dual"
+        await session.hangup()
 
 
 async def test_play_sends_the_audio_then_waits_for_the_carrier_to_finish_it():
@@ -162,6 +180,22 @@ async def test_listen_collects_the_caller_and_stops_after_they_pause():
     await session.hangup()
 
 
+async def test_caller_audio_during_playback_is_not_taken_as_the_answer():
+    api, stream_registry, socket = FakeTelnyxApi(), MediaStreamRegistry(), FakeTelnyxSocket()
+    session = await answered_session(make_provider(api, stream_registry), stream_registry, socket)
+
+    # Said over the agent: it queues up while the greeting plays.
+    chatter = base64.b64encode(speech(40)).decode()
+    await socket.push({"event": "media", "media": {"track": "inbound", "payload": chatter}})
+    await session.play(AudioChunk(data=speech(60), duration_ms=60, encoding="mulaw"))
+
+    # Nothing new arrives after the greeting, so the turn must wait, not return stale audio.
+    heard = await session.listen(timeout_seconds=0.3)
+
+    assert heard.data == b""
+    await session.hangup()
+
+
 async def test_hangup_ends_the_call_through_the_rest_api():
     api, stream_registry, socket = FakeTelnyxApi(), MediaStreamRegistry(), FakeTelnyxSocket()
     session = await answered_session(make_provider(api, stream_registry), stream_registry, socket)
@@ -181,6 +215,19 @@ async def test_transfer_hands_the_call_to_the_destination():
 
     assert api.calls[-1] == ("/v2/calls/cc-1/actions/transfer", {"to": "+15550100777"})
     assert not session.is_open
+
+
+async def test_a_refused_transfer_is_a_classified_telephony_error():
+    api, stream_registry, socket = FakeTelnyxApi(), MediaStreamRegistry(), FakeTelnyxSocket()
+    session = await answered_session(make_provider(api, stream_registry), stream_registry, socket)
+    api.status, api.body = 422, {"errors": [{"detail": "Invalid destination"}]}
+
+    with pytest.raises(TelephonyError) as exc:
+        await session.transfer("support-queue")
+
+    assert exc.value.provider == "telnyx"
+    assert exc.value.category is FailureCategory.INVALID_NUMBER
+    assert session.is_open  # the caller is still on the line; the runtime hangs up
 
 
 async def test_an_unanswered_call_is_hung_up_and_retried_as_no_answer():
